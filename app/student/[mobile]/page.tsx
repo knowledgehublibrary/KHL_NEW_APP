@@ -17,8 +17,34 @@ export default function StudentDetail() {
   const [loading, setLoading] = useState(true)
   const [showImageView, setShowImageView] = useState(false)
 
+  // 🔐 USER STATE (for future role usage)
+  const [role, setRole] = useState('')
+
+  // ✅ AUTH + FETCH (FIXES BLANK ISSUE)
   useEffect(() => {
-    if (mobile) fetchStudent()
+    const init = async () => {
+      const { data: sessionData } = await supabase.auth.getSession()
+
+      if (!sessionData.session) {
+        router.push('/login')
+        return
+      }
+
+      const user = sessionData.session.user
+
+      // 🔥 get role (future use)
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      setRole(profile?.role || '')
+
+      if (mobile) fetchStudent()
+    }
+
+    init()
   }, [mobile])
 
   async function fetchStudent() {
@@ -39,12 +65,12 @@ export default function StudentDetail() {
 
   const student = data[0]
 
-  // 🔥 SUMMARY CALC
+  // 🔥 SUMMARY
   const totalFees = data.reduce((s, r) => s + (r.final_fees || 0), 0)
   const totalPaid = data.reduce((s, r) => s + (r.fees_submitted || 0), 0)
   const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
 
-  // 🔥 IMAGE VIEW
+  // 🔥 FULL IMAGE VIEW
   if (showImageView) {
     return (
       <div className="min-h-screen bg-black">
@@ -69,7 +95,7 @@ export default function StudentDetail() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 text-gray-800">
 
-      {/* 🔥 PAGE BACK BUTTON */}
+      {/* 🔙 BACK */}
       <button
         onClick={() => router.back()}
         className="mb-3 flex items-center gap-1 text-sm text-gray-600 hover:text-black"
@@ -84,7 +110,6 @@ export default function StudentDetail() {
           src={getProxyUrl(student.photo) || '/default-avatar.png'}
           onClick={() => student.photo && setShowImageView(true)}
           onError={(e) => {
-            console.log('Image failed:', student.photo)
             e.currentTarget.src = '/default-avatar.png'
           }}
           className="w-20 h-20 rounded-full object-cover border cursor-pointer"
