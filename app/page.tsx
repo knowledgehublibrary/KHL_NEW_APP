@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 // 🔥 GLOBAL CACHE
 let cachedStudents: any[] | null = null
@@ -14,12 +15,43 @@ function getProxyUrl(url: string) {
 }
 
 export default function Home() {
+  const router = useRouter()
+
   const [students, setStudents] = useState<any[]>([])
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
+
+  // 🔐 USER STATE
+  const [userName, setUserName] = useState('')
+  const [role, setRole] = useState('')
+
+  // 🚀 AUTH CHECK + FETCH USER
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data } = await supabase.auth.getSession()
+
+      if (!data.session) {
+        router.push('/login')
+        return
+      }
+
+      const user = data.session.user
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name, role')
+        .eq('id', user.id)
+        .single()
+
+      setUserName(profile?.name || '')
+      setRole(profile?.role || '')
+    }
+
+    checkUser()
+  }, [])
 
   // 🚀 DEBOUNCE SEARCH
   useEffect(() => {
@@ -30,7 +62,7 @@ export default function Home() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  // 🚀 INITIAL FETCH (ONLY ONCE)
+  // 🚀 INITIAL FETCH
   useEffect(() => {
     if (!loaded) {
       fetchStudents()
@@ -39,7 +71,6 @@ export default function Home() {
   }, [loaded])
 
   async function fetchStudents() {
-    // ✅ CACHE HIT
     if (cachedStudents) {
       setStudents(cachedStudents)
       setLoading(false)
@@ -52,30 +83,34 @@ export default function Home() {
       .from('v_student_summary')
       .select('*')
 
-    console.log('DATA:', data)
-    console.log('ERROR:', error)
-
     if (!error) {
       setStudents(data || [])
       cachedStudents = data
     }
 
     setLoading(false)
+    console.log('DATA:', data)
+    console.log('ERROR:', error)
   }
 
-  // 🚀 MEMOIZED FILTERING
+  // 🚀 MEMO FILTER
   const filtered = useMemo(() => {
     return students.filter((s) => {
       const matchSearch =
         s.name?.toLowerCase().includes(search.toLowerCase()) ||
         s.mobile_number?.includes(search)
 
+         // 🚫 ROLE BASED FILTER
+      // if (role === 'viewer' && s.status?.toLowerCase().includes('blocked')) {
+      //   return false
+      // }
+
       if (filter === 'all') return matchSearch
       return matchSearch && s.status?.toLowerCase().includes(filter)
     })
   }, [students, search, filter])
 
-  // 📊 COUNTS (also memoized)
+  // 📊 STATS
   const stats = useMemo(() => {
     return {
       total: students.length,
@@ -85,11 +120,39 @@ export default function Home() {
     }
   }, [students])
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-6 text-gray-800">
+  // 🔴 LOGOUT
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
 
-      {/* HEADER */}
-      <h1 className="text-3xl font-bold mb-6">📚 Library Dashboard</h1>
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 text-gray-800">
+
+      {/* 🔥 HEADER BAR */}
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-2">
+        <h1 className="text-2xl md:text-3xl font-bold">
+          📚 Library Dashboard
+        </h1>
+
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="font-semibold text-sm md:text-base">
+              {userName}
+            </p>
+            <p className="text-xs text-gray-500">
+              {role}
+            </p>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="bg-red-500 text-white px-3 py-1 rounded text-sm"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
 
       {/* 📊 DASHBOARD */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -153,28 +216,23 @@ export default function Home() {
           <Link
             key={s.mobile_number}
             href={`/student/${s.mobile_number}`}
-            className="bg-white p-4 rounded-xl shadow hover:shadow-md transition cursor-pointer flex items-center gap-4 block"
+            className="bg-white p-4 rounded-xl shadow hover:shadow-md transition flex items-center gap-4"
           >
-
-            {/* PHOTO */}
             <img
               loading="lazy"
               src={getProxyUrl(s.image_url) || '/default-avatar.png'}
-              alt="Student"
               onError={(e) => {
                 e.currentTarget.src = '/default-avatar.png'
               }}
               className="w-14 h-14 rounded-lg object-cover shadow"
             />
 
-            {/* DETAILS */}
             <div className="flex-1">
               <p className="font-semibold text-lg">{s.name}</p>
               <p className="text-sm text-gray-500">{s.mobile_number}</p>
 
               <div className="mt-2 flex items-center gap-3 flex-wrap">
 
-                {/* STATUS */}
                 <span
                   className={`text-xs px-2 py-1 rounded ${
                     s.status?.includes('Expired')
@@ -189,23 +247,19 @@ export default function Home() {
                   {s.status}
                 </span>
 
-                {/* DUE */}
                 <span className="text-sm font-medium">
                   💰 ₹{s.total_due || 0}
                 </span>
 
-                {/* COUNT */}
                 <span className="text-xs text-gray-500">
                   📄 {s.total_admissions} records
                 </span>
 
               </div>
             </div>
-
           </Link>
         ))}
       </div>
-
     </div>
   )
 }
