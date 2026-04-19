@@ -28,8 +28,33 @@ function formatDateForDB() {
   })
 }
 
+// 🔥 NEW FUNCTION (ADDED ONLY)
+function getWhatsappLink(name: string, mobile: string, due: number, expiry: string) {
+  const today = new Date()
+  const exp = new Date(expiry)
+
+  let message = ''
+
+  if (due > 0 && exp < today) {
+    message = `Hi ${name}, your plan was *expired on ${formatDate(expiry)}* and your *last due fees is Rs.${due}*.`
+  } else if (due > 0) {
+    message = `Hi ${name}, your *due fees is Rs.${due}*.`
+  } else if (exp < today) {
+    message = `Hi ${name}, your plan was *expired on ${formatDate(expiry)}*. Renew today!!`
+  } else {
+    return ''
+  }
+
+  const finalMsg = `${message}
+_Knowledge Hub Library_
+https://g.co/kgs/iMBXRFr`
+
+  return `https://wa.me/91${mobile}?text=${encodeURIComponent(finalMsg)}`
+}
+
 export default function StudentDetail() {
-  const { mobile } = useParams()
+  const params = useParams()
+  const mobile = params?.mobile as string
   const router = useRouter()
 
   const [data, setData] = useState<any[]>([])
@@ -37,11 +62,13 @@ export default function StudentDetail() {
   const [showImageView, setShowImageView] = useState(false)
 
   const [role, setRole] = useState('')
-  const [userName, setUserName] = useState('') // ✅ NEW
+  const [userName, setUserName] = useState('')
 
   const [showPopup, setShowPopup] = useState(false)
   const [dueAmount, setDueAmount] = useState(0)
   const [mode, setMode] = useState('Cash')
+
+  const [isBlocked, setIsBlocked] = useState(false)
 
   useEffect(() => {
     const init = async () => {
@@ -61,9 +88,12 @@ export default function StudentDetail() {
         .single()
 
       setRole(profile?.role || '')
-      setUserName(profile?.name || '') // ✅ SET NAME
+      setUserName(profile?.name || '')
 
-      if (mobile) fetchStudent()
+      if (mobile) {
+        fetchStudent()
+        checkBlocked()
+      }
     }
 
     init()
@@ -82,6 +112,71 @@ export default function StudentDetail() {
     setLoading(false)
   }
 
+  async function checkBlocked() {
+    const { data } = await supabase
+      .schema('library_management')
+      .from('blocked')
+      .select('*')
+      .eq('mobile_number', mobile)
+      .single()
+
+    if (data && !data.is_unblocked) {
+      setIsBlocked(true)
+    }
+  }
+
+  async function handleBlockToggle() {
+    const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
+
+    if (!isBlocked && totalDue > 0) {
+      alert('Cannot block user with pending due')
+      return
+    }
+
+    const { data: existing } = await supabase
+      .schema('library_management')
+      .from('blocked')
+      .select('*')
+      .eq('mobile_number', mobile)
+      .maybeSingle()
+
+    if (!existing) {
+      await supabase.schema('library_management').from('blocked').insert([
+        { mobile_number: mobile, created_by: userName },
+      ])
+      setIsBlocked(true)
+    } else {
+      if (existing.is_unblocked) {
+        await supabase
+          .schema('library_management')
+          .from('blocked')
+          .update({
+            is_unblocked: false,
+            created_by: userName,
+            created_at: new Date().toISOString(),
+            unblocked_by: null,
+          })
+          .eq('mobile_number', mobile)
+
+        setIsBlocked(true)
+      } else {
+        await supabase
+          .schema('library_management')
+          .from('blocked')
+          .update({
+            is_unblocked: true,
+            unblocked_by: userName,
+          })
+          .eq('mobile_number', mobile)
+
+        setIsBlocked(false)
+      }
+    }
+
+    fetchStudent()
+    checkBlocked()
+  }
+
   async function submitDue() {
     const latest = data[data.length - 1]
 
@@ -92,10 +187,10 @@ export default function StudentDetail() {
         {
           register_id: latest.register_id,
           due_fees_submitted: dueAmount,
-          due_fees_submitted_date: formatDateForDB(), // ✅ FIXED
+          due_fees_submitted_date: formatDateForDB(),
           due_fees_mode: mode,
-          created_by: userName, // ✅ NEW
-        }
+          created_by: userName,
+        },
       ])
 
     if (error) {
@@ -112,7 +207,6 @@ export default function StudentDetail() {
 
   const student = data[0]
 
-  // ✅ LATEST RECORD
   const latestRecord = [...data].sort(
     (a, b) => new Date(b.expiry).getTime() - new Date(a.expiry).getTime()
   )[0]
@@ -120,6 +214,22 @@ export default function StudentDetail() {
   const totalFees = data.reduce((s, r) => s + (r.final_fees || 0), 0)
   const totalPaid = data.reduce((s, r) => s + (r.fees_submitted || 0), 0)
   const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
+
+  // 🔥 NEW LOGIC (ADDED ONLY)
+  const today = new Date()
+  const expiryDate = new Date(latestRecord?.expiry)
+  const isExpired = expiryDate < today
+  const hasDue = totalDue > 0
+
+  const showWhatsapp =
+    hasDue || isExpired
+
+  const whatsappLink = getWhatsappLink(
+    student.name,
+    mobile,
+    totalDue,
+    latestRecord?.expiry
+  )
 
   if (showImageView) {
     return (
@@ -151,7 +261,6 @@ export default function StudentDetail() {
 
       {/* HEADER */}
       <div className="bg-white p-5 rounded-xl shadow mb-4 flex justify-between">
-
         <div className="flex gap-4">
           <img
             src={getProxyUrl(student.photo) || '/default-avatar.png'}
@@ -161,71 +270,82 @@ export default function StudentDetail() {
 
           <div>
             <h1 className="text-xl font-bold">{student.name}</h1>
-            <p className="text-gray-500">{mobile}</p>
+
+            {/* 🔥 UPDATED MOBILE */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <a href={`tel:${mobile}`} className="text-blue-600 font-medium">
+                📞 {mobile}
+              </a>
+
+              {showWhatsapp && whatsappLink && (
+                <a
+                  href={whatsappLink}
+                  target="_blank"
+                  className="bg-green-500 text-white px-3 py-1 rounded text-xs"
+                >
+                  WhatsApp
+                </a>
+              )}
+            </div>
 
             <div className="flex gap-2 mt-2 text-xs">
-
-              <span
-                className={`px-2 py-1 rounded ${
-                  latestRecord?.status?.includes('Expired')
-                    ? 'bg-red-100 text-red-700'
-                    : latestRecord?.status?.includes('Active')
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-yellow-100 text-yellow-700'
-                }`}
-              >
+              <span className="bg-green-100 text-green-700 px-2 py-1 rounded">
                 {latestRecord?.status}
               </span>
-
               <span className="bg-gray-100 px-2 py-1 rounded">
                 Exp: {formatDate(latestRecord?.expiry)}
               </span>
-
             </div>
           </div>
         </div>
+      </div>
 
-        {(role === 'admin' || role === 'manager') && totalDue > 0 && (
-          <button
-            onClick={() => {
-              setDueAmount(totalDue)
-              setShowPopup(true)
-            }}
-            className="bg-blue-600 text-white px-3 py-1 rounded text-sm"
-          >
-            Submit Due
-          </button>
-        )}
+      {/* 🔥 ACTION BAR (NEW) */}
+      <div className="bg-white rounded-xl shadow mb-4 p-3 flex justify-between items-center flex-wrap gap-2">
+        <div className="text-sm text-gray-500">Quick Actions</div>
+
+        <div className="flex gap-2 flex-wrap">
+
+          {(role === 'admin' || role === 'manager') && totalDue > 0 && (
+            <button
+              onClick={() => {
+                setDueAmount(totalDue)
+                setShowPopup(true)
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+            >
+              Submit Due
+            </button>
+          )}
+
+          {(role === 'admin' || role === 'manager') && (
+            <button
+              onClick={handleBlockToggle}
+              className={`px-4 py-2 rounded-lg text-white text-sm ${
+                isBlocked ? 'bg-green-600' : 'bg-red-600'
+              }`}
+            >
+              {isBlocked ? 'Unblock User' : 'Block User'}
+            </button>
+          )}
+
+        </div>
       </div>
 
       {/* SUMMARY */}
       <div className="bg-white rounded-xl shadow mb-4 p-4 text-sm grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div>
-          <p className="text-gray-500 text-xs">Total Admissions</p>
-          <p className="font-semibold">{data.length}</p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs">Total Fees</p>
-          <p className="font-semibold">₹{totalFees}</p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs">Paid</p>
-          <p className="font-semibold text-green-600">₹{totalPaid}</p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs">Due</p>
-          <p className="font-semibold text-red-600">₹{totalDue}</p>
-        </div>
+        <div><p>Total Admissions</p><p>{data.length}</p></div>
+        <div><p>Total Fees</p><p>₹{totalFees}</p></div>
+        <div><p>Paid</p><p className="text-green-600">₹{totalPaid}</p></div>
+        <div><p>Due</p><p className="text-red-600">₹{totalDue}</p></div>
       </div>
 
       {/* TABLE */}
       <div className="bg-white rounded-xl shadow overflow-auto">
-
         <table className="min-w-[800px] w-full text-sm border">
-
           <thead className="bg-gray-100 text-xs">
             <tr>
-              <th className="p-2 border text-left">Reg ID</th>
+              <th className="p-2 border">Reg ID</th>
               <th className="p-2 border">Start</th>
               <th className="p-2 border">Expiry</th>
               <th className="p-2 border">Seat</th>
@@ -238,11 +358,9 @@ export default function StudentDetail() {
           </thead>
 
           <tbody>
-            {[...data]
-              .sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())
+            {[...data].sort((a,b)=>new Date(b.start_date).getTime()-new Date(a.start_date).getTime())
               .map((row) => (
-                <tr key={row.register_id} className="hover:bg-gray-50">
-
+                <tr key={row.register_id}>
                   <td className="p-2 border">{row.register_id}</td>
                   <td className="p-2 border">{formatDate(row.start_date)}</td>
                   <td className="p-2 border">{formatDate(row.expiry)}</td>
@@ -252,19 +370,16 @@ export default function StudentDetail() {
                   <td className="p-2 border">₹{row.fees_submitted || 0}</td>
                   <td className="p-2 border text-red-600">₹{row.due_fees || 0}</td>
                   <td className="p-2 border">{row.status}</td>
-
                 </tr>
               ))}
           </tbody>
-
         </table>
       </div>
 
       {/* POPUP */}
       {showPopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center">
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-center">
           <div className="bg-white p-5 rounded-xl w-[90%] max-w-sm">
-
             <h2 className="mb-3 font-semibold">Submit Due</h2>
 
             <input
@@ -291,14 +406,10 @@ export default function StudentDetail() {
 
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowPopup(false)}>Cancel</button>
-              <button
-                onClick={submitDue}
-                className="bg-green-600 text-white px-3 py-1 rounded"
-              >
+              <button onClick={submitDue} className="bg-green-600 text-white px-3 py-1 rounded">
                 Submit
               </button>
             </div>
-
           </div>
         </div>
       )}
