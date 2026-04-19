@@ -100,7 +100,7 @@ export default function LoginPage() {
             </div>
             <h1 className="text-white font-bold tracking-tight"
               style={{ fontFamily: "'Georgia', serif", fontSize: '22px', letterSpacing: '-0.3px' }}>
-              Knowledge Hub
+              Knowledge Hub Library
             </h1>
             <p className="text-white/30 text-xs mt-1 tracking-widest uppercase">Library Management</p>
           </div>
