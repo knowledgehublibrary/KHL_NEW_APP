@@ -70,6 +70,12 @@ export default function StudentDetail() {
 
   const [isBlocked, setIsBlocked] = useState(false)
 
+  // 🔥 NEW STATES (ADDED ONLY)
+  const [isFrozen, setIsFrozen] = useState(false)
+  const [hasEverFrozen, setHasEverFrozen] = useState(false)
+  const [showFreezePopup, setShowFreezePopup] = useState(false)
+  const [freezeDate, setFreezeDate] = useState(formatDateForDB())
+
   useEffect(() => {
     const init = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
@@ -124,6 +130,34 @@ export default function StudentDetail() {
       setIsBlocked(true)
     }
   }
+
+  // 🔥 NEW FUNCTION (FREEZE CHECK)
+  async function checkFreeze() {
+    const latest = data[data.length - 1]
+    if (!latest?.register_id) return
+
+    const { data: freezeData } = await supabase
+      .schema('library_management')
+      .from('freeeze')
+      .select('*')
+      .eq('register_id', latest.register_id)
+      .maybeSingle()
+
+    if (freezeData) {
+      setHasEverFrozen(true)
+      setIsFrozen(!freezeData.unfreeze_date)
+    } else {
+      setHasEverFrozen(false)
+      setIsFrozen(false)
+    }
+  }
+
+  // 🔥 NEW EFFECT (ADDED ONLY)
+  useEffect(() => {
+    if (data.length) {
+      checkFreeze()
+    }
+  }, [data])
 
   async function handleBlockToggle() {
     const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
@@ -202,6 +236,46 @@ export default function StudentDetail() {
     }
   }
 
+  // 🔥 FREEZE
+  async function handleFreeze() {
+    const latest = data[data.length - 1]
+
+    await supabase
+      .schema('library_management')
+      .from('freeeze')
+      .upsert([
+        {
+          register_id: latest.register_id,
+          freeze_date: freezeDate,
+          created_by: userName,
+          unfreeze_date: null,
+          unfreeze_by: null,
+        },
+      ])
+
+    setShowFreezePopup(false)
+    fetchStudent()
+    checkFreeze()
+  }
+
+  // 🔥 UNFREEZE
+  async function handleUnfreeze() {
+    const latest = data[data.length - 1]
+
+    await supabase
+      .schema('library_management')
+      .from('freeeze')
+      .update({
+        unfreeze_date: freezeDate,
+        unfreeze_by: userName,
+      })
+      .eq('register_id', latest.register_id)
+
+    setShowFreezePopup(false)
+    fetchStudent()
+    checkFreeze()
+  }
+
   if (loading) return <p className="p-6">Loading...</p>
   if (!data.length) return <p className="p-6">No data found</p>
 
@@ -211,9 +285,12 @@ export default function StudentDetail() {
     (a, b) => new Date(b.expiry).getTime() - new Date(a.expiry).getTime()
   )[0]
 
-  const totalFees = data.reduce((s, r) => s + (r.final_fees || 0), 0)
-  const totalPaid = data.reduce((s, r) => s + (r.fees_submitted || 0), 0)
-  const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
+  // 👁️ VIEWER sees only the latest record; admin/manager see all
+  const displayData = role === 'viewer' ? [latestRecord] : data
+
+  const totalFees = displayData.reduce((s, r) => s + (r.final_fees || 0), 0)
+  const totalPaid = displayData.reduce((s, r) => s + (r.fees_submitted || 0), 0)
+  const totalDue = displayData.reduce((s, r) => s + (r.due_fees || 0), 0)
 
   // 🔥 NEW LOGIC (ADDED ONLY)
   const today = new Date()
@@ -221,8 +298,7 @@ export default function StudentDetail() {
   const isExpired = expiryDate < today
   const hasDue = totalDue > 0
 
-  const showWhatsapp =
-    hasDue || isExpired
+  const showWhatsapp = hasDue || isExpired
 
   const whatsappLink = getWhatsappLink(
     student.name,
@@ -230,6 +306,18 @@ export default function StudentDetail() {
     totalDue,
     latestRecord?.expiry
   )
+
+  const isActive = latestRecord?.status?.toLowerCase().includes('active')
+
+  const canFreeze =
+    (role === 'admin' || role === 'manager') &&
+    isActive &&
+    !hasDue &&
+    !hasEverFrozen
+
+  const canUnfreeze =
+    (role === 'admin' || role === 'manager') &&
+    isFrozen
 
   if (showImageView) {
     return (
@@ -271,7 +359,6 @@ export default function StudentDetail() {
           <div>
             <h1 className="text-xl font-bold">{student.name}</h1>
 
-            {/* 🔥 UPDATED MOBILE */}
             <div className="flex items-center gap-3 flex-wrap">
               <a href={`tel:${mobile}`} className="text-blue-600 font-medium">
                 📞 {mobile}
@@ -300,7 +387,7 @@ export default function StudentDetail() {
         </div>
       </div>
 
-      {/* 🔥 ACTION BAR (NEW) */}
+      {/* ACTION BAR */}
       <div className="bg-white rounded-xl shadow mb-4 p-3 flex justify-between items-center flex-wrap gap-2">
         <div className="text-sm text-gray-500">Quick Actions</div>
 
@@ -329,12 +416,30 @@ export default function StudentDetail() {
             </button>
           )}
 
+          {canFreeze && (
+            <button
+              onClick={() => setShowFreezePopup(true)}
+              className="bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm"
+            >
+              Freeze
+            </button>
+          )}
+
+          {canUnfreeze && (
+            <button
+              onClick={() => setShowFreezePopup(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm"
+            >
+              Unfreeze
+            </button>
+          )}
+
         </div>
       </div>
 
       {/* SUMMARY */}
       <div className="bg-white rounded-xl shadow mb-4 p-4 text-sm grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div><p>Total Admissions</p><p>{data.length}</p></div>
+        <div><p>Total Admissions</p><p>{displayData.length}</p></div>
         <div><p>Total Fees</p><p>₹{totalFees}</p></div>
         <div><p>Paid</p><p className="text-green-600">₹{totalPaid}</p></div>
         <div><p>Due</p><p className="text-red-600">₹{totalDue}</p></div>
@@ -358,7 +463,7 @@ export default function StudentDetail() {
           </thead>
 
           <tbody>
-            {[...data].sort((a,b)=>new Date(b.start_date).getTime()-new Date(a.start_date).getTime())
+            {[...displayData].sort((a,b)=>new Date(b.start_date).getTime()-new Date(a.start_date).getTime())
               .map((row) => (
                 <tr key={row.register_id}>
                   <td className="p-2 border">{row.register_id}</td>
@@ -376,7 +481,7 @@ export default function StudentDetail() {
         </table>
       </div>
 
-      {/* POPUP */}
+      {/* SUBMIT DUE POPUP */}
       {showPopup && (
         <div className="fixed inset-0 bg-black/40 flex justify-center items-center">
           <div className="bg-white p-5 rounded-xl w-[90%] max-w-sm">
@@ -409,6 +514,43 @@ export default function StudentDetail() {
               <button onClick={submitDue} className="bg-green-600 text-white px-3 py-1 rounded">
                 Submit
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FREEZE POPUP */}
+      {showFreezePopup && (
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-center">
+          <div className="bg-white p-5 rounded-xl w-[90%] max-w-sm">
+            <h2 className="mb-3 font-semibold">
+              {isFrozen ? 'Unfreeze Student' : 'Freeze Student'}
+            </h2>
+
+            <input
+              value={freezeDate}
+              onChange={(e) => setFreezeDate(e.target.value)}
+              className="w-full border p-2 mb-4 rounded"
+            />
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowFreezePopup(false)}>Cancel</button>
+
+              {!isFrozen ? (
+                <button
+                  onClick={handleFreeze}
+                  className="bg-yellow-500 text-white px-3 py-1 rounded"
+                >
+                  Freeze
+                </button>
+              ) : (
+                <button
+                  onClick={handleUnfreeze}
+                  className="bg-green-600 text-white px-3 py-1 rounded"
+                >
+                  Unfreeze
+                </button>
+              )}
             </div>
           </div>
         </div>
