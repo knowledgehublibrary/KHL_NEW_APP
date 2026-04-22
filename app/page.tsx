@@ -56,6 +56,14 @@ function NewAdmissionButton() {
   const [loading, setLoading] = useState(false)
 
   const handleClick = async () => {
+    // Open the window IMMEDIATELY before any await — browsers block popups
+    // that are opened after async operations (works locally but fails on Vercel).
+    const newWindow = window.open('', '_blank')
+    if (!newWindow) {
+      alert('Pop-up was blocked. Please allow pop-ups for this site.')
+      return
+    }
+
     setLoading(true)
     try {
       const { data: lastRecord } = await supabase
@@ -86,9 +94,12 @@ function NewAdmissionButton() {
         'entry.1136862612': nextRegId,
       })
       const url = `${FORM_BASE}?${params.toString()}&entry.157693685=6+AM+-+12+PM&entry.157693685=12+PM+-+6+PM&entry.157693685=6+PM+-+11+PM`
-      window.open(url, '_blank')
+
+      // Navigate the already-opened window to the final URL
+      newWindow.location.href = url
     } catch (e) {
       console.error(e)
+      newWindow.close()
     } finally {
       setLoading(false)
     }
@@ -408,12 +419,14 @@ export default function Home() {
   }), [students])
 
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login') }
+
   const toggleSelect = useCallback((mobile: string) => {
     setSelectedMobiles(prev => { const next = new Set(prev); next.has(mobile) ? next.delete(mobile) : next.add(mobile); return next })
   }, [])
 
   const bulkBlockEligible = useMemo(() =>
     filtered.filter(s => s.status?.toLowerCase().includes('expired') && !(s.total_due > 0)), [filtered])
+
   const selectAll = () =>
     setSelectedMobiles(new Set(filter === 'blocked' ? filtered.map(s => s.mobile_number) : bulkBlockEligible.map(s => s.mobile_number)))
 
@@ -471,13 +484,13 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Seat map visible to all */}
+            {/* Seat map — visible to all */}
             <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
               style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
               🗺️ Seat Map
             </Link>
 
-            {/* Admin/Manager only nav items */}
+            {/* Admin / Manager only */}
             {isAdminOrManager && (
               <>
                 <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
@@ -492,12 +505,9 @@ export default function Home() {
               </>
             )}
 
-            {/* User info + logout */}
+            {/* User info + logout — role intentionally hidden */}
             <div className="flex items-center gap-2 ml-1">
-              <div className="text-right">
-                <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
-                <p className="text-[10px] uppercase tracking-widest" style={{ color: T.textMuted }}>{role}</p>
-              </div>
+              <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
               <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-medium border"
                 style={{ color: '#dc2626', borderColor: '#fecaca', background: 'transparent' }}>
                 Logout
