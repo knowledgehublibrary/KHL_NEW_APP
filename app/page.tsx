@@ -36,6 +36,16 @@ function isDateOlderThan20Days(dateStr: string) {
 
 const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
 
+// Fire-and-forget Apps Script ping — uses no-cors so CORS never blocks it on Vercel.
+// Google's server still receives and executes the request.
+async function pingAppsScript() {
+  try {
+    await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' })
+  } catch (e) {
+    console.warn('Apps Script ping failed:', e)
+  }
+}
+
 function StatusBadge({ status }: { status: string }) {
   const s = status?.toLowerCase() || ''
   let bg = '#fef9c3', color = '#854d0e', border = '#fde68a'
@@ -56,8 +66,8 @@ function NewAdmissionButton() {
   const [loading, setLoading] = useState(false)
 
   const handleClick = async () => {
-    // Open the window IMMEDIATELY before any await — browsers block popups
-    // that are opened after async operations (works locally but fails on Vercel).
+    // Open window IMMEDIATELY before any await — browsers block popups opened
+    // after async operations (works locally but fails on Vercel).
     const newWindow = window.open('', '_blank')
     if (!newWindow) {
       alert('Pop-up was blocked. Please allow pop-ups for this site.')
@@ -94,8 +104,6 @@ function NewAdmissionButton() {
         'entry.1136862612': nextRegId,
       })
       const url = `${FORM_BASE}?${params.toString()}&entry.157693685=6+AM+-+12+PM&entry.157693685=12+PM+-+6+PM&entry.157693685=6+PM+-+11+PM`
-
-      // Navigate the already-opened window to the final URL
       newWindow.location.href = url
     } catch (e) {
       console.error(e)
@@ -254,7 +262,8 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     const { error: insertError } = await supabase.schema('library_management').from('admission_responses').insert([payload])
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
-    try { await fetch(APPS_SCRIPT_URL, { method: 'GET' }) } catch (e) { console.warn('Apps Script call failed:', e) }
+    // Ping Apps Script with no-cors so CORS never blocks it in production
+    pingAppsScript()
 
     onSuccess(); onClose()
   }
@@ -484,13 +493,10 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Seat map — visible to all */}
             <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
               style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
               🗺️ Seat Map
             </Link>
-
-            {/* Admin / Manager only */}
             {isAdminOrManager && (
               <>
                 <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
@@ -504,8 +510,6 @@ export default function Home() {
                 <NewAdmissionButton />
               </>
             )}
-
-            {/* User info + logout — role intentionally hidden */}
             <div className="flex items-center gap-2 ml-1">
               <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
               <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-medium border"
