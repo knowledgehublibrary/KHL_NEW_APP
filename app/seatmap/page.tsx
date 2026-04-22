@@ -27,10 +27,9 @@ function slotColor(occupants: string[]): { bg: string; color: string; border: st
 type SeatSlot = {
   M: string[]; A: string[]; E: string[]
   mobileM: string[]; mobileA: string[]; mobileE: string[]
-  startM: string[]; startA: string[]; startE: string[]
+  expiryM: string[]; expiryA: string[]; expiryE: string[]
 }
 
-// Statuses to SHOW on the seat map (not blocked)
 function isVisible(status: string) {
   const s = status?.toLowerCase() || ''
   return s.includes('active') || s.includes('freeze') || s.includes('freezed') || s.includes('expired')
@@ -48,18 +47,20 @@ export default function SeatMapPage() {
 
   async function fetchData() {
     setLoading(true)
+    // v_student_summary already returns one row per student (latest record),
+    // which is exactly what a seat map needs.
     const { data, error } = await supabase
-      .from('v_admission_details')
-      .select('name, mobile_number, seat, shift, status, expiry, start_date')
-      .order('seat', { ascending: true })
+      .from('v_student_summary')
+      .select('name, mobile_number, latest_seat, latest_shift, status, latest_expiry')
+      .order('latest_seat', { ascending: true })
     if (!error) setRecords((data || []).filter(r => isVisible(r.status)))
     setLoading(false)
   }
 
-  // 0-seat / unassigned students (seat is 0 or null/NaN)
+  // Students with seat 0 or unassigned
   const unreservedStudents = useMemo(() => {
     return records.filter((r) => {
-      const n = parseInt(r.seat)
+      const n = parseInt(r.latest_seat)
       return isNaN(n) || n === 0
     })
   }, [records])
@@ -68,18 +69,22 @@ export default function SeatMapPage() {
   const seatMap = useMemo(() => {
     const map: Record<number, SeatSlot> = {}
     for (let i = 1; i <= 92; i++) {
-      map[i] = { M: [], A: [], E: [], mobileM: [], mobileA: [], mobileE: [], startM: [], startA: [], startE: [] }
+      map[i] = {
+        M: [], A: [], E: [],
+        mobileM: [], mobileA: [], mobileE: [],
+        expiryM: [], expiryA: [], expiryE: [],
+      }
     }
     records.forEach((rec) => {
-      const seatNum = parseInt(rec.seat)
+      const seatNum = parseInt(rec.latest_seat)
       if (isNaN(seatNum) || seatNum < 1 || seatNum > 92) return
-      const shifts = (rec.shift || '').split(', ').map((x: string) => x.trim())
+      const shifts = (rec.latest_shift || '').split(', ').map((x: string) => x.trim())
       const shortName = rec.name?.split(' ').slice(0, 2).join(' ') || ''
       shifts.forEach((shift: string) => {
         const key = SHIFT_MAP[shift]
-        if (key === 'M') { map[seatNum].M.push(shortName); map[seatNum].mobileM.push(rec.mobile_number); map[seatNum].startM.push(rec.start_date) }
-        if (key === 'A') { map[seatNum].A.push(shortName); map[seatNum].mobileA.push(rec.mobile_number); map[seatNum].startA.push(rec.start_date) }
-        if (key === 'E') { map[seatNum].E.push(shortName); map[seatNum].mobileE.push(rec.mobile_number); map[seatNum].startE.push(rec.start_date) }
+        if (key === 'M') { map[seatNum].M.push(shortName); map[seatNum].mobileM.push(rec.mobile_number); map[seatNum].expiryM.push(rec.latest_expiry) }
+        if (key === 'A') { map[seatNum].A.push(shortName); map[seatNum].mobileA.push(rec.mobile_number); map[seatNum].expiryA.push(rec.latest_expiry) }
+        if (key === 'E') { map[seatNum].E.push(shortName); map[seatNum].mobileE.push(rec.mobile_number); map[seatNum].expiryE.push(rec.latest_expiry) }
       })
     })
     return map
@@ -87,15 +92,15 @@ export default function SeatMapPage() {
 
   // Conflicts: seat+shift with >1 student
   const conflictSeats = useMemo(() => {
-    const out: { seat: number; shift: string; names: string[]; mobiles: string[]; dates: string[] }[] = []
+    const out: { seat: number; shift: string; names: string[]; mobiles: string[]; expiries: string[] }[] = []
     Object.entries(seatMap).forEach(([seatStr, slot]) => {
       const seat = parseInt(seatStr)
       ;(['M', 'A', 'E'] as const).forEach((sh) => {
         const names = slot[sh]
         if (names.length <= 1) return
         const mobiles = sh === 'M' ? slot.mobileM : sh === 'A' ? slot.mobileA : slot.mobileE
-        const dates = sh === 'M' ? slot.startM : sh === 'A' ? slot.startA : slot.startE
-        out.push({ seat, shift: sh, names, mobiles, dates })
+        const expiries = sh === 'M' ? slot.expiryM : sh === 'A' ? slot.expiryA : slot.expiryE
+        out.push({ seat, shift: sh, names, mobiles, expiries })
       })
     })
     return out
@@ -124,7 +129,6 @@ export default function SeatMapPage() {
     return out
   }, [seatMap, search])
 
-  // Rows of 10
   const rows = useMemo(() => {
     const seats = Array.from({ length: 92 }, (_, i) => i + 1)
     const out: number[][] = []
@@ -133,6 +137,8 @@ export default function SeatMapPage() {
   }, [])
 
   const shiftFullName: Record<string, string> = { M: '6 AM – 12 PM', A: '12 PM – 6 PM', E: '6 PM – 11 PM' }
+
+  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
   return (
     <div className="min-h-screen" style={{ background: T.bg }}>
@@ -147,7 +153,6 @@ export default function SeatMapPage() {
             <p className="text-[10px] mt-0.5 uppercase tracking-widest" style={{ color: T.textMuted }}>Knowledge Hub Library · Active, Frozen &amp; Expired</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Unreserved pill */}
             {unreservedStudents.length > 0 && (
               <button onClick={() => setShowUnreservedModal(true)}
                 className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
@@ -159,7 +164,6 @@ export default function SeatMapPage() {
                 </span>
               </button>
             )}
-            {/* Conflicts button */}
             <button onClick={() => setShowConflictsModal(true)}
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold"
               style={{
@@ -200,7 +204,6 @@ export default function SeatMapPage() {
 
         {/* CONTROLS */}
         <div className="flex gap-3 mb-6 flex-wrap items-center">
-          {/* Shift toggle */}
           <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
             {(['all', 'M', 'A', 'E'] as const).map((v) => {
               const labels = { all: 'All', M: 'Morning', A: 'Afternoon', E: 'Evening' }
@@ -259,7 +262,6 @@ export default function SeatMapPage() {
                         overflow: 'hidden',
                         flexShrink: 0,
                       }}>
-                      {/* Seat header */}
                       <div className="px-2.5 py-1.5 flex items-center justify-between"
                         style={{ background: isVacantAll ? '#f8fafc' : hasConflict ? '#fef9c3' : T.accentLight, borderBottom: `1px solid ${isVacantAll ? '#e2e8f0' : hasConflict ? '#fde68a' : T.accentBorder}` }}>
                         <span className="text-[11px] font-bold" style={{ color: isVacantAll ? '#94a3b8' : hasConflict ? '#854d0e' : T.accent, fontFamily: "'Georgia', serif" }}>
@@ -268,7 +270,6 @@ export default function SeatMapPage() {
                         {isVacantAll && <span className="text-[9px]" style={{ color: '#cbd5e1' }}>EMPTY</span>}
                         {hasConflict && <span className="text-[9px] font-bold" style={{ color: '#854d0e' }}>⚠</span>}
                       </div>
-                      {/* Slots */}
                       <div className="p-1.5 space-y-1">
                         {shiftsToShow.map((sh) => {
                           const occupants = seat[sh]
@@ -325,7 +326,7 @@ export default function SeatMapPage() {
                       <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
                         <td className="px-3 py-2.5 text-xs font-medium" style={{ color: T.text }}>{r.name}</td>
                         <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.mobile_number}</td>
-                        <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.shift}</td>
+                        <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.latest_shift}</td>
                         <td className="px-3 py-2.5">
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
                             style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
@@ -371,7 +372,7 @@ export default function SeatMapPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-                        {['Seat', 'Shift', 'Student', 'Mobile', 'Start Date'].map(h => (
+                        {['Seat', 'Shift', 'Student', 'Mobile', 'Expiry'].map(h => (
                           <th key={h} className="text-left px-3 py-2.5 text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>{h}</th>
                         ))}
                       </tr>
@@ -391,7 +392,7 @@ export default function SeatMapPage() {
                             <td className="px-3 py-2.5 text-xs" style={{ color: T.text }}>{name}</td>
                             <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{conflict.mobiles[ni]}</td>
                             <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>
-                              {conflict.dates[ni] ? new Date(conflict.dates[ni]).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                              {formatDate(conflict.expiries[ni])}
                             </td>
                           </tr>
                         ))
