@@ -32,13 +32,11 @@ type SeatSlot = {
   E: SlotOccupant[]
 }
 
-// Frozen students are intentionally excluded — they don't occupy a seat
 function isVisible(status: string) {
   const s = status?.toLowerCase() || ''
   return s.includes('active') || s.includes('expired')
 }
 
-// Among multiple occupants, pick the one with the latest expiry to display
 function latestOccupant(occupants: SlotOccupant[]): SlotOccupant | null {
   if (!occupants.length) return null
   return occupants.reduce((a, b) =>
@@ -48,13 +46,10 @@ function latestOccupant(occupants: SlotOccupant[]): SlotOccupant | null {
 
 function slotColor(occupants: SlotOccupant[]): { bg: string; color: string; border: string } {
   if (!occupants.length) return { bg: '#f1f5f9', color: '#94a3b8', border: '#e2e8f0' }
-  // Conflict → yellow (takes visual precedence over blocked)
   if (occupants.length > 1) return { bg: '#fef9c3', color: '#854d0e', border: '#fde68a' }
-  // Single blocked student → red
   if (occupants[0].status?.toLowerCase().includes('expired')) {
     return { bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' }
   }
-  // Normal occupied → green
   return { bg: '#dcfce7', color: '#166534', border: '#86efac' }
 }
 
@@ -135,7 +130,6 @@ export default function SeatMapPage() {
     return out
   }, [seatMap, search])
 
-  // On mobile show 5 seats per row, on desktop 10
   const rows = useMemo(() => {
     const seats = Array.from({ length: 92 }, (_, i) => i + 1)
     const out: number[][] = []
@@ -214,7 +208,6 @@ export default function SeatMapPage() {
 
         {/* ── CONTROLS ── */}
         <div className="flex gap-2 md:gap-3 mb-4 flex-wrap items-center">
-          {/* Shift toggle */}
           <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
             {(['all', 'M', 'A', 'E'] as const).map(v => {
               const labels = { all: 'All', M: 'M', A: 'A', E: 'E' }
@@ -254,7 +247,7 @@ export default function SeatMapPage() {
               {label}
             </span>
           ))}
-          <span className="text-[10px]" style={{ color: T.textMuted }}>M · A · E = shifts</span>
+          <span className="text-[10px]" style={{ color: T.textMuted }}>M · A · E = shifts · tap name to open student</span>
         </div>
 
         {loading ? (
@@ -264,7 +257,6 @@ export default function SeatMapPage() {
             <p className="text-sm" style={{ color: T.textMuted }}>Loading seats…</p>
           </div>
         ) : (
-          /* Horizontally scrollable on mobile so cards never crush */
           <div className="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
             <div className="space-y-2 md:space-y-4" style={{ minWidth: '340px' }}>
               {rows.map((row, ri) => (
@@ -276,7 +268,6 @@ export default function SeatMapPage() {
                     const shiftsToShow = shiftView === 'all' ? (['M', 'A', 'E'] as const) : ([shiftView] as const)
                     const isVacantAll = slot.M.length === 0 && slot.A.length === 0 && slot.E.length === 0
 
-                    // On mobile shiftView=all each card is ~86px; single shift ~100px
                     const cardW = shiftView === 'all' ? 86 : 108
 
                     return (
@@ -315,16 +306,30 @@ export default function SeatMapPage() {
                             const occupants = slot[sh]
                             const display = latestOccupant(occupants)
                             const sc = slotColor(occupants)
-                            const label = !display
+
+                            // Build the display label
+                            const rawLabel = !display
                               ? '—'
                               : occupants.length > 1
                                 ? `${display.name.split(' ')[0]} +${occupants.length - 1}`
-                                : display.name.split(' ')[0]   // first name only on mobile
+                                : display.name.split(' ')[0]
+
                             return (
                               <div key={sh} className="flex items-center gap-1 px-1 py-0.5 rounded"
                                 style={{ background: sc.bg, border: `1px solid ${sc.border}` }}>
                                 <span style={{ fontSize: '8px', fontWeight: 700, color: sc.color, minWidth: '8px' }}>{sh}</span>
-                                <span className="truncate" style={{ fontSize: '9px', color: sc.color, maxWidth: '60px' }}>{label}</span>
+                                {display ? (
+                                  // Clickable name — navigates to student profile
+                                  <Link
+                                    href={`/student/${display.mobile}`}
+                                    className="truncate hover:underline"
+                                    style={{ fontSize: '9px', color: sc.color, maxWidth: '60px', lineHeight: 1.3 }}
+                                    title={display.name}>
+                                    {rawLabel}
+                                  </Link>
+                                ) : (
+                                  <span className="truncate" style={{ fontSize: '9px', color: sc.color, maxWidth: '60px' }}>—</span>
+                                )}
                               </div>
                             )
                           })}
@@ -353,7 +358,6 @@ export default function SeatMapPage() {
             style={{ background: T.surface, border: `1px solid ${T.border}` }}>
             <div className="h-[3px] rounded-t-2xl"
               style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-            {/* Drag handle on mobile */}
             <div className="flex justify-center pt-3 sm:hidden">
               <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
             </div>
@@ -382,7 +386,16 @@ export default function SeatMapPage() {
                   <tbody>
                     {unreservedStudents.map((r, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td className="px-3 py-2.5 text-xs font-medium" style={{ color: T.text }}>{r.name}</td>
+                        <td className="px-3 py-2.5 text-xs font-medium" style={{ color: T.text }}>
+                          {/* Clickable name in unreserved modal */}
+                          <Link
+                            href={`/student/${r.mobile_number}`}
+                            className="hover:underline"
+                            style={{ color: T.accent }}
+                            onClick={() => setShowUnreservedModal(false)}>
+                            {r.name}
+                          </Link>
+                        </td>
                         <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.mobile_number}</td>
                         <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.latest_shift || '—'}</td>
                         <td className="px-3 py-2.5">
@@ -451,13 +464,13 @@ export default function SeatMapPage() {
                           (a, b) => new Date(b.expiry).getTime() - new Date(a.expiry).getTime()
                         )
                         return sorted.map((occ, ni) => {
-                          const isBlocked = occ.status?.toLowerCase().includes('blocked')
+                          const isExpired = occ.status?.toLowerCase().includes('expired')
                           const isOnMap = ni === 0
                           return (
                             <tr key={`${ci}-${ni}`}
                               style={{
                                 borderBottom: `1px solid ${T.border}`,
-                                background: isBlocked ? '#fff5f5' : isOnMap ? '#f0fdf4' : T.surface,
+                                background: isExpired ? '#fff5f5' : isOnMap ? '#f0fdf4' : T.surface,
                               }}>
                               {ni === 0 && (
                                 <td className="px-3 py-2.5 font-bold text-xs" rowSpan={sorted.length}
@@ -471,8 +484,15 @@ export default function SeatMapPage() {
                                   {shiftFullName[conflict.shift]}
                                 </td>
                               )}
-                              <td className="px-3 py-2.5 text-xs" style={{ color: T.text }}>
-                                {occ.name}
+                              <td className="px-3 py-2.5 text-xs">
+                                {/* Clickable name in conflicts modal */}
+                                <Link
+                                  href={`/student/${occ.mobile}`}
+                                  className="hover:underline font-medium"
+                                  style={{ color: T.text }}
+                                  onClick={() => setShowConflictsModal(false)}>
+                                  {occ.name}
+                                </Link>
                                 {isOnMap && (
                                   <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
                                     style={{ background: '#dcfce7', color: '#166534' }}>
@@ -487,9 +507,9 @@ export default function SeatMapPage() {
                               <td className="px-3 py-2.5">
                                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
                                   style={{
-                                    background: isBlocked ? '#fee2e2' : '#dcfce7',
-                                    color: isBlocked ? '#991b1b' : '#166534',
-                                    border: `1px solid ${isBlocked ? '#fca5a5' : '#86efac'}`,
+                                    background: isExpired ? '#fee2e2' : '#dcfce7',
+                                    color: isExpired ? '#991b1b' : '#166534',
+                                    border: `1px solid ${isExpired ? '#fca5a5' : '#86efac'}`,
                                   }}>
                                   {occ.status}
                                 </span>
