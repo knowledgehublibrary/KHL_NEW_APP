@@ -252,6 +252,8 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
   const [comment, setComment] = useState('')
   const now = new Date().toISOString()
 
+  const minFees = Math.round(500 * parseFloat(months || '1'))
+
   useEffect(() => {
     const fetchRegId = async () => {
       setRegIdLoading(true)
@@ -276,7 +278,7 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
     if (isDateOlderThan20Days(startDate)) { setError('Start date cannot be older than 20 days'); return }
-    if (!regId) { setError('Register ID not loaded'); return }
+    if (parseFloat(finalFees) < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return}    if (!regId) { setError('Register ID not loaded'); return }
     setSaving(true); setError('')
 
     const payload = {
