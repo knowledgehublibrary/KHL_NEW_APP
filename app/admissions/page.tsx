@@ -62,11 +62,14 @@ export default function AdmissionsPage() {
     const init = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
       if (!sessionData.session) { router.push('/login'); return }
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', sessionData.session.user.id).single()
+      const r = profile?.role || ''
+      // Only admin and partner can access the ledger; manager and viewer cannot
+      if (r !== 'admin' && r !== 'partner') { router.push('/'); return }
+      fetchAllData()
     }
     init()
   }, [])
-
-  useEffect(() => { fetchAllData() }, [])
 
   async function fetchAllData() {
     setLoading(true)
@@ -93,7 +96,6 @@ export default function AdmissionsPage() {
 
   const filtered = useMemo(() => {
     return data.filter((row) => {
-      // DATE FILTER — on `timestamp` OR `due_fees_submitted_date`
       if (afterDate || beforeDate) {
         const after = afterDate ? localMidnight(afterDate) : null
         const before = beforeDate ? localEndOfDay(beforeDate) : null
@@ -142,11 +144,10 @@ export default function AdmissionsPage() {
       else if (mode === 'online') { onlineFees += fees; onlinePaid += paid }
       if (due > 0) totalDue += due
 
-      // Due paid: only count if due_fees_submitted_date is within selected date range
       const dueDate = r.due_fees_submitted_date ? new Date(r.due_fees_submitted_date) : null
       const dueDateOk = (after || before)
         ? dueDate && (!after || dueDate >= after) && (!before || dueDate <= before)
-        : true // no date filter — count all
+        : true
       if (dueDateOk && duePaid > 0) {
         totalDuePaid += duePaid
         if (dueMode === 'cash') cashDuePaid += duePaid
@@ -358,7 +359,6 @@ export default function AdmissionsPage() {
                     const tsInRange = ts ? (!after || ts >= after) && (!before || ts <= before) : false
                     const dueDate = row.due_fees_submitted_date ? new Date(row.due_fees_submitted_date) : null
                     const dueDateInRange = dueDate ? (!after || dueDate >= after) && (!before || dueDate <= before) : false
-                    // Yellow tint for rows that only matched via due date
                     const isDueOnly = (afterDate || beforeDate) && !tsInRange && dueDateInRange
 
                     return (
