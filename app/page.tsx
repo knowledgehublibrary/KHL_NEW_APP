@@ -36,14 +36,43 @@ function isDateOlderThan20Days(dateStr: string) {
 
 const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
 
-// Fire-and-forget Apps Script ping — uses no-cors so CORS never blocks it on Vercel.
-// Google's server still receives and executes the request.
 async function pingAppsScript() {
   try {
     await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' })
   } catch (e) {
     console.warn('Apps Script ping failed:', e)
   }
+}
+
+// ─── CONFIRM MODAL (replaces browser confirm() which is unreliable on mobile) ─
+function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onConfirm, onCancel }: {
+  message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: 'rgba(28,25,23,0.6)', backdropFilter: 'blur(4px)' }}>
+      <div className="w-full max-w-xs rounded-2xl shadow-2xl"
+        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        <div className="h-[3px] rounded-t-2xl"
+          style={{ background: `linear-gradient(90deg, transparent, ${danger ? '#dc2626' : T.accent}, transparent)` }}/>
+        <div className="p-6">
+          <p className="text-sm font-medium text-center mb-6" style={{ color: T.text }}>{message}</p>
+          <div className="flex gap-3">
+            <button onClick={onCancel}
+              className="flex-1 py-3 rounded-xl text-sm font-medium"
+              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>
+              Cancel
+            </button>
+            <button onClick={onConfirm}
+              className="flex-1 py-3 rounded-xl text-sm font-semibold"
+              style={{ background: danger ? '#dc2626' : T.accent, color: 'white' }}>
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -66,8 +95,6 @@ function NewAdmissionButton() {
   const [loading, setLoading] = useState(false)
 
   const handleClick = async () => {
-    // Open window IMMEDIATELY before any await — browsers block popups opened
-    // after async operations (works locally but fails on Vercel).
     const newWindow = window.open('', '_blank')
     if (!newWindow) {
       alert('Pop-up was blocked. Please allow pop-ups for this site.')
@@ -133,7 +160,8 @@ const StudentCard = memo(({
   s: any; selectable: boolean; selected: boolean
   onToggle: (mobile: string) => void; onRenew: (s: any) => void; role: string
 }) => {
-  const canRenew = (role === 'admin' || role === 'manager') && s.status?.toLowerCase().includes('expired')
+  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
+  const canRenew = isPrivileged && s.status?.toLowerCase().includes('expired')
   const statusDot = s.status?.includes('Active') ? '#16a34a'
     : s.status?.includes('Blocked') ? '#9ca3af'
     : s.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
@@ -262,9 +290,7 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     const { error: insertError } = await supabase.schema('library_management').from('admission_responses').insert([payload])
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
-    // Ping Apps Script with no-cors so CORS never blocks it in production
     pingAppsScript()
-
     onSuccess(); onClose()
   }
 
@@ -385,6 +411,9 @@ export default function Home() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [renewStudent, setRenewStudent] = useState<any | null>(null)
 
+  // Custom confirm modal state — replaces browser confirm() which is unreliable on mobile
+  const [confirmModal, setConfirmModal] = useState<{ message: string; confirmLabel: string; danger: boolean; onConfirm: () => void } | null>(null)
+
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getSession()
@@ -439,9 +468,7 @@ export default function Home() {
   const selectAll = () =>
     setSelectedMobiles(new Set(filter === 'blocked' ? filtered.map(s => s.mobile_number) : bulkBlockEligible.map(s => s.mobile_number)))
 
-  const handleBulkBlock = async () => {
-    if (selectedMobiles.size === 0) return
-    if (!confirm(`Block ${selectedMobiles.size} student(s)?`)) return
+  const executeBulkBlock = async () => {
     setBulkLoading(true)
     for (const mobile of Array.from(selectedMobiles)) {
       const { data: existing } = await supabase.schema('library_management').from('blocked').select('*').eq('mobile_number', mobile).maybeSingle()
@@ -452,9 +479,7 @@ export default function Home() {
     cachedStudents = null; fetchStudents(true)
   }
 
-  const handleBulkUnblock = async () => {
-    if (selectedMobiles.size === 0) return
-    if (!confirm(`Unblock ${selectedMobiles.size} student(s)?`)) return
+  const executeBulkUnblock = async () => {
     setBulkLoading(true)
     for (const mobile of Array.from(selectedMobiles)) {
       const { data: existing } = await supabase.schema('library_management').from('blocked').select('*').eq('mobile_number', mobile).maybeSingle()
@@ -464,9 +489,32 @@ export default function Home() {
     cachedStudents = null; fetchStudents(true)
   }
 
-  const isAdminOrManager = role === 'admin' || role === 'manager'
-  const showBulkBlock = isAdminOrManager && filter === 'expired'
-  const showBulkUnblock = isAdminOrManager && filter === 'blocked'
+  const handleBulkBlock = () => {
+    if (selectedMobiles.size === 0) return
+    setConfirmModal({
+      message: `Block ${selectedMobiles.size} student${selectedMobiles.size !== 1 ? 's' : ''}?`,
+      confirmLabel: `🔒 Block ${selectedMobiles.size}`,
+      danger: true,
+      onConfirm: () => { setConfirmModal(null); executeBulkBlock() },
+    })
+  }
+
+  const handleBulkUnblock = () => {
+    if (selectedMobiles.size === 0) return
+    setConfirmModal({
+      message: `Unblock ${selectedMobiles.size} student${selectedMobiles.size !== 1 ? 's' : ''}?`,
+      confirmLabel: `🔓 Unblock ${selectedMobiles.size}`,
+      danger: false,
+      onConfirm: () => { setConfirmModal(null); executeBulkUnblock() },
+    })
+  }
+
+  // Role helpers
+  // admin & partner: full access  |  manager: no ledger, expenses last-7-days  |  viewer: read-only
+  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
+  const canSeeLedger = role === 'admin' || role === 'partner'
+  const showBulkBlock = isPrivileged && filter === 'expired'
+  const showBulkUnblock = isPrivileged && filter === 'blocked'
 
   const CARDS = [
     { key: 'active',  label: 'Active',  count: stats.active,  color: '#16a34a', lightBg: '#f0fdf4', border: '#bbf7d0' },
@@ -497,12 +545,15 @@ export default function Home() {
               style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
               🗺️ Seat Map
             </Link>
-            {isAdminOrManager && (
+            {isPrivileged && (
               <>
-                <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
-                  style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                  📋 Ledger
-                </Link>
+                {/* Ledger: admin + partner only, NOT manager */}
+                {canSeeLedger && (
+                  <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
+                    style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+                    📋 Ledger
+                  </Link>
+                )}
                 <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
                   style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
                   💸 Expenses
@@ -603,6 +654,17 @@ export default function Home() {
         <RenewPopup student={renewStudent} userName={userName}
           onClose={() => setRenewStudent(null)}
           onSuccess={() => { cachedStudents = null; fetchStudents(true) }}/>
+      )}
+
+      {/* Custom confirm modal — mobile-safe replacement for window.confirm() */}
+      {confirmModal && (
+        <ConfirmModal
+          message={confirmModal.message}
+          confirmLabel={confirmModal.confirmLabel}
+          danger={confirmModal.danger}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
       )}
     </div>
   )
