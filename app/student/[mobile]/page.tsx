@@ -77,7 +77,6 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-// ─── ACTION BUTTON ─────────────────────────────────────────────────────────────
 function ActionBtn({ onClick, color, bg, border, children, disabled }: any) {
   return (
     <button onClick={onClick} disabled={disabled}
@@ -313,7 +312,6 @@ function ChangeSeatPopup({ latestRecord, userName, onClose, onSuccess }: {
       }])
 
     if (upsertErr) {
-      // unique constraint violation — already changed once
       if (upsertErr.code === '23505') {
         setError('Seat has already been changed for this registration. A new seat change can only be done after renewal.')
       } else {
@@ -406,6 +404,8 @@ export default function StudentDetail() {
   const [mode, setMode] = useState('Cash')
 
   const [isBlocked, setIsBlocked] = useState(false)
+  // Inline error for block/unblock actions — shown near the Quick Actions section
+  const [blockError, setBlockError] = useState('')
 
   const [isFrozen, setIsFrozen] = useState(false)
   const [hasEverFrozen, setHasEverFrozen] = useState(false)
@@ -462,8 +462,16 @@ export default function StudentDetail() {
 
   async function handleBlockToggle() {
     const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
-    if (!isBlocked && totalDue > 0) { alert('Cannot block user with pending due'); return }
 
+    // Inline error instead of alert() — visible on mobile without dialog
+    if (!isBlocked && totalDue > 0) {
+      setBlockError(`Cannot block: this student has ₹${totalDue} in pending dues. Clear dues first.`)
+      // Auto-dismiss after 5 seconds
+      setTimeout(() => setBlockError(''), 5000)
+      return
+    }
+
+    setBlockError('')
     const { data: existing } = await supabase.schema('library_management').from('blocked').select('*').eq('mobile_number', mobile).maybeSingle()
     if (!existing) {
       await supabase.schema('library_management').from('blocked').insert([{ mobile_number: mobile, created_by: userName }])
@@ -541,11 +549,12 @@ export default function StudentDetail() {
   const whatsappLink = getWhatsappLink(student.name, mobile, totalDue, latestRecord?.expiry)
   const isActive = latestRecord?.status?.toLowerCase().includes('active')
 
-  const isAdminOrManager = role === 'admin' || role === 'manager'
-  const canRenew = isAdminOrManager && isExpired
-  const canFreeze = isAdminOrManager && isActive && !hasDue && !hasEverFrozen
-  const canUnfreeze = isAdminOrManager && isFrozen
-  const canChangeSeat = isAdminOrManager && isActive && !seatAlreadyChanged
+  // admin, manager, partner all get privileged actions
+  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
+  const canRenew = isPrivileged && isExpired
+  const canFreeze = isPrivileged && isActive && !hasDue && !hasEverFrozen
+  const canUnfreeze = isPrivileged && isFrozen
+  const canChangeSeat = isPrivileged && isActive && !seatAlreadyChanged
 
   const renewStudentObj = {
     name: student.name,
@@ -593,7 +602,6 @@ export default function StudentDetail() {
                 onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
                 className="w-20 h-20 rounded-2xl object-cover cursor-pointer"
                 style={{ border: `2px solid ${T.border}` }} />
-              {/* Status dot */}
               <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 rounded-full border-2"
                 style={{
                   borderColor: T.surface,
@@ -629,7 +637,6 @@ export default function StudentDetail() {
                 </div>
               </div>
 
-              {/* Info pills */}
               <div className="mt-3 flex gap-2 flex-wrap">
                 <span className="text-[11px] px-2.5 py-1 rounded-full" style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textSub }}>
                   🪑 Seat {latestRecord?.seat ?? '—'}
@@ -665,7 +672,7 @@ export default function StudentDetail() {
           <p className="text-[10px] uppercase tracking-widest font-medium mb-3" style={{ color: T.textMuted }}>Quick Actions</p>
           <div className="flex gap-2 flex-wrap">
 
-            {isAdminOrManager && hasDue && (
+            {isPrivileged && hasDue && (
               <ActionBtn onClick={() => { setDueAmount(totalDue); setShowDuePopup(true) }}
                 color="#1d4ed8" bg="#eff6ff" border="#bfdbfe">
                 💰 Submit Due
@@ -700,7 +707,7 @@ export default function StudentDetail() {
               </ActionBtn>
             )}
 
-            {isAdminOrManager && (
+            {isPrivileged && (
               <ActionBtn onClick={handleBlockToggle}
                 color={isBlocked ? '#166534' : '#991b1b'}
                 bg={isBlocked ? '#f0fdf4' : '#fef2f2'}
@@ -711,7 +718,16 @@ export default function StudentDetail() {
 
           </div>
 
-          {canChangeSeat === false && isAdminOrManager && isActive && seatAlreadyChanged && (
+          {/* Inline block error — visible on mobile, no dialog needed */}
+          {blockError && (
+            <div className="mt-3 px-4 py-2.5 rounded-xl flex items-start gap-2"
+              style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+              <span className="shrink-0 mt-0.5">⚠️</span>
+              <p className="text-sm" style={{ color: '#991b1b' }}>{blockError}</p>
+            </div>
+          )}
+
+          {canChangeSeat === false && isPrivileged && isActive && seatAlreadyChanged && (
             <p className="mt-2 text-[10px]" style={{ color: T.textMuted }}>
               ⚠️ Seat already changed for this registration. Seat can be changed again after renewal.
             </p>
