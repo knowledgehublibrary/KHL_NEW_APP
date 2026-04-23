@@ -24,6 +24,13 @@ function formatDateTime(date: string) {
   return new Date(date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+/** Returns a date string YYYY-MM-DD for N days ago */
+function daysAgo(n: number) {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().split('T')[0]
+}
+
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`
 
 // ─── ADD EXPENSE MODAL ────────────────────────────────────────────────────────
@@ -51,7 +58,6 @@ function AddExpenseModal({ userName, onClose, onSuccess }: {
         Amount: parseFloat(amount),
         Mode: mode,
         Created_by: userName,
-        // created_at is auto-filled by DB default
       }])
 
     if (insertError) { setError(insertError.message); setSaving(false); return }
@@ -78,12 +84,10 @@ function AddExpenseModal({ userName, onClose, onSuccess }: {
             <button onClick={onClose} className="text-xl" style={{ color: T.textMuted }}>✕</button>
           </div>
 
-          {/* Timestamp */}
           <div className="mb-4 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
             🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </div>
 
-          {/* Description */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Description *</label>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)}
@@ -91,7 +95,6 @@ function AddExpenseModal({ userName, onClose, onSuccess }: {
               className={inputCls + ' resize-none'} style={inputStyle}/>
           </div>
 
-          {/* Amount + Mode */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Amount (₹) *</label>
@@ -108,7 +111,6 @@ function AddExpenseModal({ userName, onClose, onSuccess }: {
             </div>
           </div>
 
-          {/* Created by */}
           <div className="mb-5">
             <label className={labelCls} style={{ color: T.textSub }}>Recorded By</label>
             <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
@@ -154,7 +156,10 @@ export default function ExpensesPage() {
   const [role, setRole] = useState('')
   const [showModal, setShowModal] = useState(false)
 
-  // Filters
+  // For manager the from-date is locked to 7 days ago
+  const isManagerRestricted = role === 'manager'
+  const managerMinDate = daysAgo(7)
+
   const [afterDate, setAfterDate] = useState('')
   const [beforeDate, setBeforeDate] = useState('')
   const [searchText, setSearchText] = useState('')
@@ -168,8 +173,10 @@ export default function ExpensesPage() {
       const r = profile?.role || ''
       setUserName(profile?.name || '')
       setRole(r)
-      // Only admin/manager can access this page
-      if (r !== 'admin' && r !== 'manager') { router.push('/'); return }
+      // admin, manager, partner can access expenses; everyone else is redirected
+      if (r !== 'admin' && r !== 'manager' && r !== 'partner') { router.push('/'); return }
+      // Manager can only see last 7 days — default the from-date
+      if (r === 'manager') setAfterDate(daysAgo(7))
       fetchExpenses()
     }
     init()
@@ -187,9 +194,14 @@ export default function ExpensesPage() {
   }
 
   const filtered = useMemo(() => {
+    // For manager: always enforce 7-day minimum regardless of their filter input
+    const effectiveAfter = isManagerRestricted
+      ? (afterDate && afterDate > managerMinDate ? afterDate : managerMinDate)
+      : afterDate
+
     return expenses.filter((row) => {
-      if (afterDate) {
-        if (new Date(row.created_at) < new Date(afterDate)) return false
+      if (effectiveAfter) {
+        if (new Date(row.created_at) < new Date(effectiveAfter)) return false
       }
       if (beforeDate) {
         const before = new Date(beforeDate)
@@ -208,7 +220,7 @@ export default function ExpensesPage() {
       }
       return true
     })
-  }, [expenses, afterDate, beforeDate, searchText, modeFilter])
+  }, [expenses, afterDate, beforeDate, searchText, modeFilter, isManagerRestricted, managerMinDate])
 
   const summary = useMemo(() => {
     let total = 0, cash = 0, online = 0
@@ -221,7 +233,7 @@ export default function ExpensesPage() {
     return { total, cash, online, count: filtered.length }
   }, [filtered])
 
-  const hasFilters = afterDate || beforeDate || searchText || modeFilter !== 'all'
+  const hasFilters = (isManagerRestricted ? afterDate !== managerMinDate : !!afterDate) || beforeDate || searchText || modeFilter !== 'all'
   const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text }
   const labelCls = "text-[10px] uppercase tracking-widest font-medium mb-1.5 block"
 
@@ -241,6 +253,12 @@ export default function ExpensesPage() {
               </h1>
               <p className="text-[10px] mt-0.5 uppercase tracking-widest" style={{ color: T.textMuted }}>
                 {loading ? 'Loading…' : `${filtered.length} of ${expenses.length} records`}
+                {isManagerRestricted && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-semibold"
+                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                    Last 7 days
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -257,11 +275,29 @@ export default function ExpensesPage() {
         {/* FILTER PANEL */}
         <div className="rounded-2xl p-5 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>Filters</p>
+
+          {/* Manager restriction notice */}
+          {isManagerRestricted && (
+            <div className="mb-4 px-3 py-2 rounded-xl flex items-center gap-2"
+              style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+              <span className="text-sm">📅</span>
+              <p className="text-xs" style={{ color: T.accent }}>Showing expenses from the last 7 days only.</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>From</label>
-              <input type="date" value={afterDate} onChange={(e) => setAfterDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+              {isManagerRestricted ? (
+                // Manager: locked to 7-day minimum, show as readonly
+                <div className="w-full px-3 py-2 rounded-xl text-sm"
+                  style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }}>
+                  {formatDate(managerMinDate)}
+                </div>
+              ) : (
+                <input type="date" value={afterDate} onChange={(e) => setAfterDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+              )}
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>To</label>
@@ -289,10 +325,16 @@ export default function ExpensesPage() {
               </select>
             </div>
           </div>
-          {hasFilters && (
+          {hasFilters && !isManagerRestricted && (
             <button className="mt-3 text-xs font-medium hover:underline" style={{ color: T.accent }}
               onClick={() => { setAfterDate(''); setBeforeDate(''); setSearchText(''); setModeFilter('all') }}>
               ✕ Clear all filters
+            </button>
+          )}
+          {hasFilters && isManagerRestricted && (
+            <button className="mt-3 text-xs font-medium hover:underline" style={{ color: T.accent }}
+              onClick={() => { setAfterDate(managerMinDate); setBeforeDate(''); setSearchText(''); setModeFilter('all') }}>
+              ✕ Clear filters
             </button>
           )}
         </div>
@@ -373,12 +415,11 @@ export default function ExpensesPage() {
               </table>
             </div>
 
-            {/* Table footer */}
             <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-2"
               style={{ borderTop: `1px solid ${T.border}`, background: T.bg }}>
               <p className="text-xs" style={{ color: T.textMuted }}>
                 {filtered.length} record{filtered.length !== 1 ? 's' : ''}
-                {afterDate && ` · From ${formatDate(afterDate)}`}
+                {afterDate && !isManagerRestricted && ` · From ${formatDate(afterDate)}`}
                 {beforeDate && ` · To ${formatDate(beforeDate)}`}
               </p>
               <div className="flex gap-5 text-xs font-semibold">
