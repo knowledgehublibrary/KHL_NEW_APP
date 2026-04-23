@@ -551,7 +551,7 @@ export default function StudentDetail() {
 
   // admin, manager, partner all get privileged actions
   const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canRenew = isPrivileged && isExpired
+  const canRenew = isPrivileged && isExpired  && !isBlocked
   const canFreeze = isPrivileged && isActive && !hasDue && !hasEverFrozen
   const canUnfreeze = isPrivileged && isFrozen
   const canChangeSeat = isPrivileged && isActive && !seatAlreadyChanged
