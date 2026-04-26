@@ -42,7 +42,8 @@ function StatusBadge({ status }: { status: string }) {
   else if (s.includes('blocked')) { bg = '#f3f4f6'; color = '#4b5563'; border = '#d1d5db' }
   else if (s.includes('freeze') || s.includes('freezed')) { bg = '#e0f2fe'; color = '#075985'; border = '#7dd3fc' }
   return (
-    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap"
+    <span
+      className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap"
       style={{ background: bg, color, border: `1px solid ${border}` }}>
       {status}
     </span>
@@ -57,8 +58,8 @@ function MetricCard({ label, value, sub, color, bg, border, formula }: {
     <div className="rounded-xl p-4" style={{ background: bg || T.surface, border: `1px solid ${border || T.border}` }}>
       <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>{label}</p>
       <p className="text-xl font-bold" style={{ color: color || T.text, fontFamily: "'Georgia', serif" }}>{value}</p>
-      {sub && <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>{sub}</p>}
-      {formula && <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted, opacity: 0.7 }}>{formula}</p>}
+      {sub     && <p className="text-[10px] mt-1"              style={{ color: T.textMuted }}>{sub}</p>}
+      {formula && <p className="text-[9px] mt-1 font-mono"     style={{ color: T.textMuted, opacity: 0.7 }}>{formula}</p>}
     </div>
   )
 }
@@ -73,6 +74,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   )
 }
+
+// ─── SHARED STYLES ────────────────────────────────────────────────────────────
+// font-size: 16px on all inputs prevents iOS Safari auto-zoom on focus
+const inputBaseStyle: React.CSSProperties = {
+  background: T.bg,
+  border: `1px solid ${T.border}`,
+  color: T.text,
+  fontSize: '16px',         // ← critical: prevents iOS zoom
+  WebkitAppearance: 'none', // ← removes iOS default styling on inputs/selects
+}
+const labelCls  = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
+// min-height 44px + touchAction ensure comfortable tap targets on mobile
+const inputCls  = "w-full px-3 rounded-xl focus:outline-none"
+const inputHCls = "py-2.5" // combined with inputCls
 
 // ─── ADD CASH LOG MODAL ───────────────────────────────────────────────────────
 function AddCashLogModal({ userName, onClose, onSuccess }: {
@@ -89,9 +104,7 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       setError('Enter a valid positive amount'); return
     }
-    if (!description.trim()) {
-      setError('Please enter a description'); return
-    }
+    if (!description.trim()) { setError('Please enter a description'); return }
     if (type === 'Dr' && goesToBank === null) {
       setError('Please specify if this amount goes to bank'); return
     }
@@ -113,19 +126,34 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
     onSuccess(); onClose()
   }
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text }
-  const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-      <div className="relative w-full max-w-md rounded-2xl shadow-2xl"
+    // WebkitBackdropFilter required for iOS Safari — backdropFilter alone is ignored
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      style={{
+        background: 'rgba(28,25,23,0.55)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)', // ← iOS Safari fix
+        // Safe area: modal doesn't hide behind home bar on iPhone
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+      {/*
+        On mobile the sheet slides up from bottom (items-end above).
+        rounded-b-none on small screens removes the awkward gap at bottom edge.
+      */}
+      <div
+        className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl"
         style={{ background: T.surface, border: `1px solid ${T.border}` }}>
         <div className="h-[3px] rounded-t-2xl"
           style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-        <div className="p-6">
-          <div className="flex items-start justify-between mb-6">
+
+        {/* Drag handle — visual cue on mobile */}
+        <div className="flex justify-center pt-3 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
+        </div>
+
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between mb-5">
             <div>
               <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
                 Add Cash Entry
@@ -134,19 +162,30 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
                 Cr = cash received · Dr = cash going out
               </p>
             </div>
-            <button onClick={onClose} className="text-xl" style={{ color: T.textMuted }}>✕</button>
+            {/* min 44×44 touch target */}
+            <button
+              onClick={onClose}
+              className="flex items-center justify-center w-11 h-11 rounded-full"
+              style={{ color: T.textMuted, touchAction: 'manipulation' }}>
+              ✕
+            </button>
           </div>
 
+          {/* Entry Type */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Entry Type</label>
             <div className="grid grid-cols-2 gap-2">
               {(['Cr', 'Dr'] as const).map((t) => (
-                <button key={t} onClick={() => { setType(t); setGoesToBank(null) }}
-                  className="py-3 rounded-xl text-sm font-semibold transition-all"
+                <button
+                  key={t}
+                  onClick={() => { setType(t); setGoesToBank(null) }}
+                  // min-h-[44px] ensures iOS tap target compliance
+                  className="min-h-[44px] px-3 rounded-xl text-sm font-semibold transition-all"
                   style={{
                     background: type === t ? (t === 'Cr' ? '#f0fdf4' : '#fef2f2') : T.bg,
                     border: `1px solid ${type === t ? (t === 'Cr' ? '#86efac' : '#fca5a5') : T.border}`,
                     color: type === t ? (t === 'Cr' ? '#166534' : '#dc2626') : T.textSub,
+                    touchAction: 'manipulation', // prevents 300ms delay on iOS
                   }}>
                   {t === 'Cr' ? '📥 Credit (Cash In)' : '📤 Debit (Cash Out)'}
                 </button>
@@ -154,30 +193,47 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
             </div>
           </div>
 
+          {/* Amount */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Amount (₹)</label>
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
-              placeholder="0" min="1" className={inputCls} style={inputStyle}/>
+            <input
+              type="number"
+              inputMode="decimal"   // ← shows numeric keyboard on iOS/Android
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              min="1"
+              className={`${inputCls} ${inputHCls}`}
+              style={inputBaseStyle}/>
           </div>
 
+          {/* Description */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Description</label>
-            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
-              placeholder={type === 'Cr' ? 'e.g. Daily collection, Fees received…' : 'e.g. Petty cash, Staff expense, Deposit…'}
-              className={inputCls} style={inputStyle}/>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={type === 'Cr' ? 'e.g. Daily collection, Fees received…' : 'e.g. Petty cash, Staff expense…'}
+              className={`${inputCls} ${inputHCls}`}
+              style={inputBaseStyle}/>
           </div>
 
+          {/* Goes to Bank */}
           {type === 'Dr' && (
             <div className="mb-5">
               <label className={labelCls} style={{ color: T.textSub }}>Will this amount go to the bank?</label>
               <div className="grid grid-cols-2 gap-2">
                 {[true, false].map((val) => (
-                  <button key={String(val)} onClick={() => setGoesToBank(val)}
-                    className="py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  <button
+                    key={String(val)}
+                    onClick={() => setGoesToBank(val)}
+                    className="min-h-[44px] px-3 rounded-xl text-sm font-semibold transition-all"
                     style={{
                       background: goesToBank === val ? (val ? '#eff6ff' : T.bg) : T.bg,
                       border: `1px solid ${goesToBank === val ? (val ? '#bfdbfe' : T.borderHover) : T.border}`,
                       color: goesToBank === val ? (val ? '#1d4ed8' : T.text) : T.textSub,
+                      touchAction: 'manipulation',
                     }}>
                     {val ? '🏦 Yes, to bank' : '✋ No, stays out'}
                   </button>
@@ -193,19 +249,24 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
           )}
 
           {error && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+            <div className="mb-4 px-4 py-2.5 rounded-xl"
+              style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
               <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
             </div>
           )}
 
           <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>
+            <button
+              onClick={onClose}
+              className="flex-1 min-h-[48px] rounded-xl text-sm"
+              style={{ border: `1px solid ${T.border}`, color: T.textSub, touchAction: 'manipulation' }}>
               Cancel
             </button>
-            <button onClick={handleSubmit} disabled={saving}
-              className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-              style={{ background: T.accent, color: 'white' }}>
+            <button
+              onClick={handleSubmit}
+              disabled={saving}
+              className="flex-1 min-h-[48px] rounded-xl text-sm font-semibold disabled:opacity-40"
+              style={{ background: T.accent, color: 'white', touchAction: 'manipulation' }}>
               {saving
                 ? <span className="flex items-center justify-center gap-2">
                     <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
@@ -243,14 +304,20 @@ function CollapsibleTable({ toggleLabel, open, onToggle, children }: {
       <button
         onClick={onToggle}
         className="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-left transition-all"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-        <div className="flex items-center gap-3 flex-wrap min-w-0">
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          touchAction: 'manipulation', // prevents 300ms tap delay on iOS
+          minHeight: '52px',           // comfortable touch target
+        }}>
+        <div className="flex items-center gap-2 flex-wrap min-w-0 pr-2">
           {toggleLabel}
         </div>
-        <span className="ml-3 shrink-0 text-sm" style={{ color: T.textMuted }}>{open ? '▲' : '▼'}</span>
+        <span className="ml-2 shrink-0 text-sm" style={{ color: T.textMuted }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (
-        <div className="mt-2 rounded-2xl overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        <div className="mt-2 rounded-2xl overflow-hidden"
+          style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           {children}
         </div>
       )}
@@ -266,26 +333,20 @@ export default function AdminLedgerPage() {
   const [userName, setUserName]           = useState('')
   const [showCashModal, setShowCashModal] = useState(false)
 
-  // Collapsible state for all 3 tables
   const [showCashLog, setShowCashLog]     = useState(false)
   const [showAdmTable, setShowAdmTable]   = useState(false)
   const [showExpTable, setShowExpTable]   = useState(false)
 
-  // Raw data for metric cards
   const [admissionFees, setAdmissionFees] = useState<any[]>([])
   const [dueFees, setDueFees]             = useState<any[]>([])
   const [expenses, setExpenses]           = useState<any[]>([])
   const [cashLog, setCashLog]             = useState<any[]>([])
-
-  // Full table data
   const [admissions, setAdmissions]       = useState<any[]>([])
   const [expensesTable, setExpensesTable] = useState<any[]>([])
 
-  // Date filters for the two bottom tables
   const [admStartDate, setAdmStartDate]   = useState('')
   const [expStartDate, setExpStartDate]   = useState('')
 
-  // Config fields
   const [realBankBalance, setRealBankBalance]   = useState('0')
   const [extraPaid, setExtraPaid]               = useState('0')
   const [extraPaidComment, setExtraPaidComment] = useState('')
@@ -312,18 +373,15 @@ export default function AdminLedgerPage() {
   }, [])
 
   async function fetchAllRows<T>(
-    table: string,
-    columns: string,
+    table: string, columns: string,
     orderBy?: { column: string; ascending: boolean }
   ): Promise<T[]> {
     const PAGE_SIZE = 1000
-    let allRows: T[] = []
-    let from = 0
+    let allRows: T[] = [], from = 0
     while (true) {
       let query = supabase
         .schema('library_management')
-        .from(table)
-        .select(columns)
+        .from(table).select(columns)
         .range(from, from + PAGE_SIZE - 1)
       if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending })
       const { data, error } = await query
@@ -336,18 +394,13 @@ export default function AdminLedgerPage() {
   }
 
   async function fetchAllRowsView<T>(
-    view: string,
-    columns: string,
+    view: string, columns: string,
     orderBy?: { column: string; ascending: boolean }
   ): Promise<T[]> {
     const PAGE_SIZE = 1000
-    let allRows: T[] = []
-    let from = 0
+    let allRows: T[] = [], from = 0
     while (true) {
-      let query = supabase
-        .from(view)
-        .select(columns)
-        .range(from, from + PAGE_SIZE - 1)
+      let query = supabase.from(view).select(columns).range(from, from + PAGE_SIZE - 1)
       if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending })
       const { data, error } = await query
       if (error) throw new Error(`${view}: ${error.message}`)
@@ -369,21 +422,15 @@ export default function AdminLedgerPage() {
       fetchAllRows<any>('expenses', '*', { column: 'created_at', ascending: false }),
     ])
 
-    setAdmissionFees(admRows)
-    setDueFees(dueRows)
-    setExpenses(expRows)
-    setCashLog(cashRows)
-    setAdmissions(admissionRows)
-    setExpensesTable(expTableRows)
+    setAdmissionFees(admRows); setDueFees(dueRows); setExpenses(expRows)
+    setCashLog(cashRows); setAdmissions(admissionRows); setExpensesTable(expTableRows)
 
-    // Default start date = date of most recent cash_log entry
     const maxCashDate = cashRows.length > 0
       ? cashRows.reduce((max: string, r: any) => r.created_at > max ? r.created_at : max, cashRows[0].created_at)
       : ''
     if (maxCashDate) {
       const d = toDateInput(new Date(maxCashDate))
-      setAdmStartDate(d)
-      setExpStartDate(d)
+      setAdmStartDate(d); setExpStartDate(d)
     }
 
     const c = cfgRows?.[0]
@@ -396,7 +443,6 @@ export default function AdminLedgerPage() {
     }
   }
 
-  // ── Metric card calculations ─────────────────────────────────
   const m = useMemo(() => {
     const cashFees =
       admissionFees.filter(r => r.mode === 'Cash').reduce((s, r) => s + (Number(r.fees_submitted) || 0), 0) +
@@ -410,8 +456,7 @@ export default function AdminLedgerPage() {
     const onlineExpenses = expenses.filter(r => r.Mode === 'Online').reduce((s, r) => s + (r.Amount || 0), 0)
     const totalExpenses  = cashExpenses + onlineExpenses
 
-    const netProfit = LAST_NET + totalFees - totalExpenses
-
+    const netProfit    = LAST_NET + totalFees - totalExpenses
     const cashReceived = cashLog.filter(r => r.type === 'Cr').reduce((s, r) => s + (r.amount || 0), 0)
     const cashDebited  = cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0)
     const cashBanked   = cashLog.filter(r => r.type === 'Dr' && r.description === 'Bank').reduce((s, r) => s + (r.amount || 0), 0)
@@ -433,7 +478,6 @@ export default function AdminLedgerPage() {
     }
   }, [admissionFees, dueFees, expenses, cashLog, realBankBalance, extraPaid])
 
-  // ── Admissions filtered ──────────────────────────────────────
   const filteredAdmissions = useMemo(() => {
     if (!admStartDate) return admissions
     const from = localMidnight(admStartDate)
@@ -445,16 +489,14 @@ export default function AdminLedgerPage() {
   }, [admissions, admStartDate])
 
   const admSummary = useMemo(() => {
-    let totalFees = 0, cashFees = 0, onlineFees = 0
     let totalPaid = 0, cashPaid = 0, onlinePaid = 0
     let totalDuePaid = 0, cashDuePaid = 0, onlineDuePaid = 0
     let totalDue = 0
     filteredAdmissions.forEach(r => {
-      totalFees += r.final_fees || 0
       const paid = r.fees_submitted || 0
       totalPaid += paid
-      if ((r.mode || '').toLowerCase() === 'cash')   { cashFees += r.final_fees || 0; cashPaid += paid }
-      if ((r.mode || '').toLowerCase() === 'online') { onlineFees += r.final_fees || 0; onlinePaid += paid }
+      if ((r.mode || '').toLowerCase() === 'cash')   cashPaid += paid
+      if ((r.mode || '').toLowerCase() === 'online') onlinePaid += paid
       const duePaid = r.due_fees_submitted || 0
       if (duePaid > 0) {
         totalDuePaid += duePaid
@@ -472,7 +514,6 @@ export default function AdminLedgerPage() {
     }
   }, [filteredAdmissions])
 
-  // ── Expenses filtered ────────────────────────────────────────
   const filteredExpenses = useMemo(() => {
     if (!expStartDate) return expensesTable
     const from = localMidnight(expStartDate)
@@ -504,14 +545,16 @@ export default function AdminLedgerPage() {
         updated_at:         new Date().toISOString(),
       })
       .eq('id', 1)
-    setSavingConfig(false)
-    setConfigSaved(true)
+    setSavingConfig(false); setConfigSaved(true)
     setTimeout(() => setConfigSaved(false), 2500)
     await fetchAll()
   }
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: T.bg }}>
+    // -webkit-fill-available fixes iOS Safari 100vh miscalculation (address bar)
+    <div
+      className="flex items-center justify-center"
+      style={{ minHeight: '100dvh', background: T.bg }}>
       <div className="text-center">
         <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
           style={{ borderColor: T.accent, borderTopColor: 'transparent' }}/>
@@ -520,18 +563,28 @@ export default function AdminLedgerPage() {
     </div>
   )
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text }
-  const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
+  const balanced  = (v: number) => Math.abs(v) < 1
+  const greenSet  = { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0' }
+  const redSet    = { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' }
+  const amberSet  = { color: '#92400e', bg: '#fefce8', border: '#fde68a' }
+  const blueSet   = { color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' }
 
-  const balanced = (v: number) => Math.abs(v) < 1
-  const greenSet = { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0' }
-  const redSet   = { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' }
-  const amberSet = { color: '#92400e', bg: '#fefce8', border: '#fde68a' }
-  const blueSet  = { color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' }
+  // Config inputs share same base style
+  const cfgInputStyle: React.CSSProperties = { ...inputBaseStyle }
 
   return (
-    <div className="min-h-screen" style={{ background: T.bg }}>
+    /*
+      100dvh = dynamic viewport height — correctly accounts for iOS Safari's
+      collapsible address bar. Falls back to 100vh on older browsers.
+      paddingBottom safe-area ensures content isn't hidden behind iPhone home bar.
+    */
+    <div
+      className="min-h-screen"
+      style={{
+        background: T.bg,
+        minHeight: '100dvh',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
       <div className="h-1 w-full"
         style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }}/>
 
@@ -540,9 +593,15 @@ export default function AdminLedgerPage() {
         {/* ── HEADER ── */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <Link href="/" className="text-sm font-medium hover:opacity-70" style={{ color: T.textSub }}>← Home</Link>
+            <Link
+              href="/"
+              className="text-sm font-medium hover:opacity-70"
+              style={{ color: T.textSub, touchAction: 'manipulation' }}>
+              ← Home
+            </Link>
             <div>
-              <h1 className="text-lg md:text-2xl font-bold" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+              <h1 className="text-lg md:text-2xl font-bold"
+                style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
                 🏦 Admin Ledger
               </h1>
               <p className="text-[10px] mt-0.5 uppercase tracking-widest" style={{ color: T.textMuted }}>
@@ -550,9 +609,15 @@ export default function AdminLedgerPage() {
               </p>
             </div>
           </div>
-          <button onClick={() => setShowCashModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold"
-            style={{ background: T.accent, color: 'white', boxShadow: `0 2px 12px ${T.accent}50` }}>
+          <button
+            onClick={() => setShowCashModal(true)}
+            className="flex items-center gap-2 px-4 rounded-xl text-sm font-semibold"
+            style={{
+              background: T.accent, color: 'white',
+              boxShadow: `0 2px 12px ${T.accent}50`,
+              minHeight: '44px',          // iOS tap target
+              touchAction: 'manipulation',
+            }}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
             </svg>
@@ -563,18 +628,18 @@ export default function AdminLedgerPage() {
         {/* ══ SECTION 1: REVENUE ══ */}
         <Section title="Revenue — all-time fees collected">
           <div className="grid grid-cols-3 gap-2 md:gap-3">
-            <MetricCard label="💵 Cash Fees"   value={fmt(m.cashFees)}   {...amberSet}/>
-            <MetricCard label="📱 Online Fees"  value={fmt(m.onlineFees)} {...blueSet}/>
-            <MetricCard label="Total Fees"      value={fmt(m.totalFees)}  {...greenSet}/>
+            <MetricCard label="💵 Cash Fees"  value={fmt(m.cashFees)}   {...amberSet}/>
+            <MetricCard label="📱 Online Fees" value={fmt(m.onlineFees)} {...blueSet}/>
+            <MetricCard label="Total Fees"     value={fmt(m.totalFees)}  {...greenSet}/>
           </div>
         </Section>
 
         {/* ══ SECTION 2: EXPENSES ══ */}
         <Section title="Expenses — all-time">
           <div className="grid grid-cols-3 gap-2 md:gap-3">
-            <MetricCard label="💵 Cash Exp"    value={fmt(m.cashExpenses)}   {...amberSet}/>
-            <MetricCard label="📱 Online Exp"  value={fmt(m.onlineExpenses)} {...blueSet}/>
-            <MetricCard label="Total Exp"      value={fmt(m.totalExpenses)}  {...redSet}/>
+            <MetricCard label="💵 Cash Exp"   value={fmt(m.cashExpenses)}   {...amberSet}/>
+            <MetricCard label="📱 Online Exp" value={fmt(m.onlineExpenses)} {...blueSet}/>
+            <MetricCard label="Total Exp"     value={fmt(m.totalExpenses)}  {...redSet}/>
           </div>
         </Section>
 
@@ -614,7 +679,8 @@ export default function AdminLedgerPage() {
 
         {/* ══ SECTION 5: BANK RECONCILIATION ══ */}
         <Section title="Bank Reconciliation">
-          <div className="rounded-2xl p-4 md:p-5" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+          <div className="rounded-2xl p-4 md:p-5"
+            style={{ background: T.surface, border: `1px solid ${T.border}` }}>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 mb-6">
               <MetricCard label="Opening Bank"  value={fmt(LAST_BANK_BALANCE)} color={T.textSub} sub="Constant"/>
               <MetricCard label="Expected Bank" value={fmt(m.expectedBankBalance)} sub="Opening+Banked+Online−OnlineExp" {...blueSet}/>
@@ -629,39 +695,75 @@ export default function AdminLedgerPage() {
 
             <div className="border-t mb-5" style={{ borderColor: T.border }}/>
 
-            <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>Editable Fields</p>
+            <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>
+              Editable Fields
+            </p>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>Real Bank Balance (₹)</label>
-                <input type="number" value={realBankBalance} onChange={(e) => setRealBankBalance(e.target.value)}
-                  placeholder="0" className={inputCls} style={inputStyle}/>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={realBankBalance}
+                  onChange={(e) => setRealBankBalance(e.target.value)}
+                  placeholder="0"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
               </div>
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>Extra Paid (₹)</label>
-                <input type="number" value={extraPaid} onChange={(e) => setExtraPaid(e.target.value)}
-                  placeholder="0" className={inputCls} style={inputStyle}/>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={extraPaid}
+                  onChange={(e) => setExtraPaid(e.target.value)}
+                  placeholder="0"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
               </div>
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Person</label>
-                <input type="text" value={extraPaidPerson} onChange={(e) => setExtraPaidPerson(e.target.value)}
-                  placeholder="Who paid extra?" className={inputCls} style={inputStyle}/>
+                <input
+                  type="text"
+                  value={extraPaidPerson}
+                  onChange={(e) => setExtraPaidPerson(e.target.value)}
+                  placeholder="Who paid extra?"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
               </div>
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Reason</label>
-                <input type="text" value={extraPaidComment} onChange={(e) => setExtraPaidComment(e.target.value)}
-                  placeholder="Why was it paid?" className={inputCls} style={inputStyle}/>
+                <input
+                  type="text"
+                  value={extraPaidComment}
+                  onChange={(e) => setExtraPaidComment(e.target.value)}
+                  placeholder="Why was it paid?"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
               </div>
               <div className="md:col-span-2">
                 <label className={labelCls} style={{ color: T.textSub }}>Notes</label>
-                <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                  rows={2} placeholder="Any observations or notes…"
-                  className={inputCls + ' resize-none'} style={inputStyle}/>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Any observations or notes…"
+                  className={`${inputCls} py-2.5 resize-none`}
+                  style={cfgInputStyle}/>
               </div>
             </div>
 
-            <button onClick={saveConfig} disabled={savingConfig}
-              className="mt-4 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
-              style={{ background: configSaved ? '#16a34a' : T.accent, color: 'white' }}>
+            <button
+              onClick={saveConfig}
+              disabled={savingConfig}
+              className="mt-4 px-6 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
+              style={{
+                background: configSaved ? '#16a34a' : T.accent,
+                color: 'white',
+                minHeight: '44px',
+                touchAction: 'manipulation',
+              }}>
               {savingConfig ? 'Saving…' : configSaved ? '✓ Saved!' : 'Save Changes'}
             </button>
 
@@ -691,7 +793,8 @@ export default function AdminLedgerPage() {
             </div>
 
             {notes && (
-              <div className="mt-4 px-4 py-3 rounded-xl" style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+              <div className="mt-4 px-4 py-3 rounded-xl"
+                style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
                 <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.accent }}>Notes</p>
                 <p className="text-sm" style={{ color: T.text }}>{notes}</p>
               </div>
@@ -723,7 +826,8 @@ export default function AdminLedgerPage() {
               <p className="text-sm" style={{ color: T.textMuted }}>No cash log entries yet</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            // -webkit-overflow-scrolling: touch for smooth momentum scrolling on iOS
+            <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
               <table className="w-full text-sm" style={{ minWidth: '480px' }}>
                 <thead>
                   <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
@@ -764,7 +868,7 @@ export default function AdminLedgerPage() {
                     <td colSpan={3} className="px-3 py-3">
                       <div className="flex gap-3 text-xs font-semibold flex-wrap">
                         <span style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
-                        <span style={{ color: '#dc2626' }}>Dr (all): {fmt(cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0))}</span>
+                        <span style={{ color: '#dc2626' }}>Dr: {fmt(cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0))}</span>
                         <span style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>In Hand: {fmt(m.cashInHand)}</span>
                       </div>
                     </td>
@@ -796,15 +900,16 @@ export default function AdminLedgerPage() {
               )}
             </>
           }>
-
-          {/* Date filter + summary inside the collapsible */}
           <div className="p-4 border-b" style={{ borderColor: T.border }}>
             <div className="flex items-center gap-3 flex-wrap mb-4">
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
-                <input type="date" value={admStartDate}
+                <input
+                  type="date"
+                  value={admStartDate}
                   onChange={(e) => setAdmStartDate(e.target.value)}
-                  className="px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                  className="px-3 py-2 rounded-xl focus:outline-none"
+                  style={{ ...inputBaseStyle, minHeight: '44px' }}/>
               </div>
               <div className="self-end pb-1">
                 <span className="text-xs" style={{ color: T.textMuted }}>{filteredAdmissions.length} records</span>
@@ -832,7 +937,7 @@ export default function AdminLedgerPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
             <table className="w-full text-sm" style={{ minWidth: '900px' }}>
               <thead>
                 <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
@@ -845,7 +950,7 @@ export default function AdminLedgerPage() {
               <tbody>
                 {filteredAdmissions.map((row, i) => (
                   <tr key={row.register_id + i}
-                    className="transition-colors hover:bg-orange-50/30"
+                    className="transition-colors"
                     style={{ borderBottom: `1px solid ${T.border}` }}>
                     <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
                     <td className="px-3 py-3 text-xs font-mono font-medium" style={{ color: T.accent }}>
@@ -856,7 +961,11 @@ export default function AdminLedgerPage() {
                     </td>
                     <td className="px-3 py-3">
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: row.admission === 'New' ? '#f0fdf4' : T.accentLight, color: row.admission === 'New' ? '#166534' : T.accent, border: `1px solid ${row.admission === 'New' ? '#bbf7d0' : T.accentBorder}` }}>
+                        style={{
+                          background: row.admission === 'New' ? '#f0fdf4' : T.accentLight,
+                          color: row.admission === 'New' ? '#166534' : T.accent,
+                          border: `1px solid ${row.admission === 'New' ? '#bbf7d0' : T.accentBorder}`,
+                        }}>
                         {row.admission || 'New'}
                       </span>
                     </td>
@@ -912,15 +1021,16 @@ export default function AdminLedgerPage() {
               <span className="text-xs font-semibold" style={{ color: '#1d4ed8' }}>📱 {fmt(expSummary.online)}</span>
             </>
           }>
-
-          {/* Date filter + summary inside the collapsible */}
           <div className="p-4 border-b" style={{ borderColor: T.border }}>
             <div className="flex items-center gap-3 flex-wrap mb-4">
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
-                <input type="date" value={expStartDate}
+                <input
+                  type="date"
+                  value={expStartDate}
                   onChange={(e) => setExpStartDate(e.target.value)}
-                  className="px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                  className="px-3 py-2 rounded-xl focus:outline-none"
+                  style={{ ...inputBaseStyle, minHeight: '44px' }}/>
               </div>
               <div className="self-end pb-1">
                 <span className="text-xs" style={{ color: T.textMuted }}>{filteredExpenses.length} records</span>
@@ -942,7 +1052,7 @@ export default function AdminLedgerPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
             <table className="w-full text-sm" style={{ minWidth: '480px' }}>
               <thead>
                 <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
@@ -955,7 +1065,7 @@ export default function AdminLedgerPage() {
               <tbody>
                 {filteredExpenses.map((row, i) => (
                   <tr key={row.id}
-                    className="transition-colors hover:bg-orange-50/30"
+                    className="transition-colors"
                     style={{ borderBottom: `1px solid ${T.border}` }}>
                     <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
                     <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
