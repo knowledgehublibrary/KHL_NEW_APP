@@ -34,14 +34,33 @@ function daysAgo(n: number) {
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`
 
 // ─── ADD EXPENSE MODAL ────────────────────────────────────────────────────────
-function AddExpenseModal({ userName, onClose, onSuccess }: {
-  userName: string; onClose: () => void; onSuccess: () => void
+function AddExpenseModal({ userName, role, onClose, onSuccess }: {
+  userName: string
+  role: string
+  onClose: () => void
+  onSuccess: () => void
 }) {
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [mode, setMode] = useState('Cash')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Admin override: fetch all staff names from profiles
+  const [staffList, setStaffList] = useState<string[]>([])
+  const [createdBy, setCreatedBy] = useState(userName)
+
+  useEffect(() => {
+    if (role !== 'admin') return
+    const fetchStaff = async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('name')
+        .order('name')
+      if (data) setStaffList(data.map((p: any) => p.name).filter(Boolean))
+    }
+    fetchStaff()
+  }, [role])
 
   const now = new Date().toISOString()
 
@@ -57,7 +76,7 @@ function AddExpenseModal({ userName, onClose, onSuccess }: {
         Description: description.trim(),
         Amount: parseFloat(amount),
         Mode: mode,
-        Created_by: userName,
+        Created_by: createdBy,
       }])
 
     if (insertError) { setError(insertError.message); setSaving(false); return }
@@ -111,9 +130,34 @@ function AddExpenseModal({ userName, onClose, onSuccess }: {
             </div>
           </div>
 
+          {/* Recorded By — dropdown for admin, readonly for everyone else */}
           <div className="mb-5">
-            <label className={labelCls} style={{ color: T.textSub }}>Recorded By</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
+            {role === 'admin' ? (
+              <>
+                <label className={labelCls} style={{ color: T.textSub }}>
+                  Recorded By
+                  <span className="ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-semibold"
+                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                    Admin Override
+                  </span>
+                </label>
+                <select
+                  value={createdBy}
+                  onChange={(e) => setCreatedBy(e.target.value)}
+                  className={inputCls + ' appearance-none'}
+                  style={inputStyle}>
+                  {/* Logged-in user always first */}
+                  {[userName, ...staffList.filter(n => n !== userName)].map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <>
+                <label className={labelCls} style={{ color: T.textSub }}>Recorded By</label>
+                <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
+              </>
+            )}
           </div>
 
           {error && (
@@ -289,7 +333,6 @@ export default function ExpensesPage() {
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>From</label>
               {isManagerRestricted ? (
-                // Manager: locked to 7-day minimum, show as readonly
                 <div className="w-full px-3 py-2 rounded-xl text-sm"
                   style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }}>
                   {formatDate(managerMinDate)}
@@ -435,6 +478,7 @@ export default function ExpensesPage() {
       {showModal && (
         <AddExpenseModal
           userName={userName}
+          role={role}
           onClose={() => setShowModal(false)}
           onSuccess={() => fetchExpenses()}
         />
