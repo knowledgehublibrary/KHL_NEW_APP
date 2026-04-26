@@ -44,7 +44,7 @@ async function pingAppsScript() {
   }
 }
 
-// ─── CONFIRM MODAL (replaces browser confirm() which is unreliable on mobile) ─
+// ─── CONFIRM MODAL ────────────────────────────────────────────────────────────
 function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onConfirm, onCancel }: {
   message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void
 }) {
@@ -78,10 +78,10 @@ function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onCon
 function StatusBadge({ status }: { status: string }) {
   const s = status?.toLowerCase() || ''
   let bg = '#fef9c3', color = '#854d0e', border = '#fde68a'
-  if (s.includes('expired'))      { bg = '#fee2e2'; color = '#991b1b'; border = '#fca5a5' }
-  else if (s.includes('active'))  { bg = '#dcfce7'; color = '#166534'; border = '#86efac' }
+  if (s.includes('expired')) { bg = '#fee2e2'; color = '#991b1b'; border = '#fca5a5' }
+  else if (s.includes('active')) { bg = '#dcfce7'; color = '#166534'; border = '#86efac' }
   else if (s.includes('blocked')) { bg = '#f3f4f6'; color = '#4b5563'; border = '#d1d5db' }
-  else if (s.includes('freeze'))  { bg = '#e0f2fe'; color = '#075985'; border = '#7dd3fc' }
+  else if (s.includes('freeze')) { bg = '#e0f2fe'; color = '#075985'; border = '#7dd3fc' }
   return (
     <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider"
       style={{ background: bg, color, border: `1px solid ${border}` }}>
@@ -145,8 +145,13 @@ function NewAdmissionButton() {
       className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60"
       style={{ background: T.accent, color: 'white', boxShadow: `0 2px 12px ${T.accent}50` }}>
       {loading
-        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-        : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+        ? <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+        : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
+          </svg>
       }
       New Admission
     </button>
@@ -164,8 +169,8 @@ const StudentCard = memo(({
   const canRenew = isPrivileged && s.status?.toLowerCase().includes('expired')
   const statusDot = s.status?.includes('Active') ? '#16a34a'
     : s.status?.includes('Blocked') ? '#9ca3af'
-    : s.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
-    : '#dc2626'
+      : s.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
+        : '#dc2626'
 
   const innerContent = (
     <>
@@ -278,7 +283,8 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
     if (isDateOlderThan20Days(startDate)) { setError('Start date cannot be older than 20 days'); return }
-    if (parseFloat(finalFees) < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return}    if (!regId) { setError('Register ID not loaded'); return }
+    if (parseFloat(finalFees) < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
+    if (!regId) { setError('Register ID not loaded'); return }
     setSaving(true); setError('')
 
     const payload = {
@@ -319,8 +325,14 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
             🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Name</label><div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Mobile</label><div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div></div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Name</label>
+              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Mobile</label>
+              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div>
+            </div>
           </div>
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
@@ -335,8 +347,14 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
               className={inputCls} style={inputStyle}/>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Months *</label><input type="number" value={months} onChange={(e) => setMonths(e.target.value)} min="1" className={inputCls} style={inputStyle}/></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label><input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle}/></div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+              <input type="number" value={months} onChange={(e) => setMonths(e.target.value)} min="1" className={inputCls} style={inputStyle}/>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
+              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle}/>
+            </div>
           </div>
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
@@ -358,19 +376,32 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Final Fees *</label><input type="number" value={finalFees} onChange={(e) => { setFinalFees(e.target.value); setFeesSubmitted(e.target.value) }} className={inputCls} style={inputStyle}/></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label><input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle}/></div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Final Fees *</label>
+              <input type="number" value={finalFees} onChange={(e) => { setFinalFees(e.target.value); setFeesSubmitted(e.target.value) }} className={inputCls} style={inputStyle}/>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle}/>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
               <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="Cash">Cash</option><option value="Online">Online</option>
-              </select></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Admission</label><div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div></div>
+                <option value="Cash">Cash</option>
+                <option value="Online">Online</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
+              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div>
+            </div>
           </div>
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle}/>
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+              placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle}/>
           </div>
           <div className="mb-5">
             <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
@@ -382,11 +413,20 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
             </div>
           )}
           <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm" style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
             <button onClick={handleSubmit} disabled={saving || regIdLoading}
               className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
               style={{ background: T.accent, color: 'white' }}>
-              {saving ? <span className="flex items-center justify-center gap-2"><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>Saving…</span> : '✓ Confirm Renewal'}
+              {saving
+                ? <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Saving…
+                  </span>
+                : '✓ Confirm Renewal'}
             </button>
           </div>
         </div>
@@ -413,8 +453,9 @@ export default function Home() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [renewStudent, setRenewStudent] = useState<any | null>(null)
 
-  // Custom confirm modal state — replaces browser confirm() which is unreliable on mobile
-  const [confirmModal, setConfirmModal] = useState<{ message: string; confirmLabel: string; danger: boolean; onConfirm: () => void } | null>(null)
+  const [confirmModal, setConfirmModal] = useState<{
+    message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
+  } | null>(null)
 
   useEffect(() => {
     const init = async () => {
@@ -450,12 +491,12 @@ export default function Home() {
   }), [students, search, filter])
 
   const stats = useMemo(() => ({
-    total:   students.length,
-    active:  students.filter(s => s.status?.includes('Active')).length,
+    total: students.length,
+    active: students.filter(s => s.status?.includes('Active')).length,
     expired: students.filter(s => s.status?.includes('Expired')).length,
-    due:     students.filter(s => s.status?.includes('Due')).length,
+    due: students.filter(s => s.status?.includes('Due')).length,
     blocked: students.filter(s => s.status?.toLowerCase().includes('blocked')).length,
-    frozen:  students.filter(s => s.status?.toLowerCase().includes('freeze')).length,
+    frozen: students.filter(s => s.status?.toLowerCase().includes('freeze')).length,
   }), [students])
 
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login') }
@@ -512,10 +553,9 @@ export default function Home() {
   }
 
   // Role helpers
-  // admin & partner: full access  |  manager: no ledger, expenses last-7-days  |  viewer: read-only
-  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canSeeLedger = role === 'admin' || role === 'partner'
-  const showBulkBlock = isPrivileged && filter === 'expired'
+  const isPrivileged  = role === 'admin' || role === 'manager' || role === 'partner'
+  const canSeeLedger  = role === 'admin' || role === 'partner'
+  const showBulkBlock   = isPrivileged && filter === 'expired'
   const showBulkUnblock = isPrivileged && filter === 'blocked'
 
   const CARDS = [
@@ -533,7 +573,7 @@ export default function Home() {
 
       <div className="max-w-5xl mx-auto px-4 py-6 md:py-8">
 
-        {/* HEADER */}
+        {/* ── HEADER ── */}
         <div className="flex justify-between items-start mb-6 flex-wrap gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold" style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
@@ -543,26 +583,40 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Seat Map — visible to all */}
             <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
               style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
               🗺️ Seat Map
             </Link>
+
             {isPrivileged && (
               <>
-                {/* Ledger: admin + partner only, NOT manager */}
+                {/* Ledger — admin + partner only */}
                 {canSeeLedger && (
                   <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
                     style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
                     📋 Ledger
                   </Link>
                 )}
+
+                {/* Admin Ledger — admin only */}
+                {role === 'admin' && (
+                  <Link href="/admin_ledger" className="px-3 py-2 rounded-xl text-xs font-medium"
+                    style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+                    🏦 Admin Ledger
+                  </Link>
+                )}
+
+                {/* Expenses — admin, manager, partner */}
                 <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
                   style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
                   💸 Expenses
                 </Link>
-                <NewAdmissionButton />
+
+                <NewAdmissionButton/>
               </>
             )}
+
             <div className="flex items-center gap-2 ml-1">
               <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
               <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-medium border"
@@ -573,25 +627,37 @@ export default function Home() {
           </div>
         </div>
 
-        {/* STAT CARDS */}
+        {/* ── STAT CARDS ── */}
         <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
           {CARDS.map(({ key, label, count, color, lightBg, border }) => {
             const active = selectedCard === key
             return (
               <button key={key} onClick={() => { setSelectedCard(key); startTransition(() => setFilter(key)) }}
                 className="rounded-2xl p-3 md:p-4 text-left relative overflow-hidden transition-all duration-150"
-                style={{ background: active ? lightBg : T.surface, border: `1px solid ${active ? border : T.border}`, transform: active ? 'scale(1.03)' : 'scale(1)', boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,0.05)' }}>
-                {active && <div className="absolute top-0 inset-x-0 h-[3px]" style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}/>}
-                <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: active ? color : T.textMuted }}>{label}</p>
-                <p className="text-2xl md:text-3xl font-bold mt-0.5" style={{ fontFamily: "'Georgia', serif", color: active ? color : T.text }}>{count}</p>
+                style={{
+                  background: active ? lightBg : T.surface,
+                  border: `1px solid ${active ? border : T.border}`,
+                  transform: active ? 'scale(1.03)' : 'scale(1)',
+                  boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,0.05)',
+                }}>
+                {active && (
+                  <div className="absolute top-0 inset-x-0 h-[3px]"
+                    style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}/>
+                )}
+                <p className="text-[10px] font-semibold uppercase tracking-widest"
+                  style={{ color: active ? color : T.textMuted }}>{label}</p>
+                <p className="text-2xl md:text-3xl font-bold mt-0.5"
+                  style={{ fontFamily: "'Georgia', serif", color: active ? color : T.text }}>{count}</p>
               </button>
             )
           })}
         </div>
 
-        {/* SEARCH + BULK */}
+        {/* ── SEARCH + BULK CONTROLS ── */}
         <div className="flex gap-3 mb-4 flex-wrap">
-          <input type="text" placeholder="Search by name or mobile…"
+          <input
+            type="text"
+            placeholder="Search by name or mobile…"
             className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl text-sm focus:outline-none"
             style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text }}
             onFocus={e => (e.currentTarget.style.borderColor = T.accent)}
@@ -600,36 +666,67 @@ export default function Home() {
           {showBulkBlock && (
             <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
               className="px-4 py-2.5 rounded-xl text-sm font-medium"
-              style={{ background: bulkMode ? '#fee2e2' : '#fff1f2', border: `1px solid ${bulkMode ? '#fca5a5' : '#fecdd3'}`, color: '#dc2626' }}>
+              style={{
+                background: bulkMode ? '#fee2e2' : '#fff1f2',
+                border: `1px solid ${bulkMode ? '#fca5a5' : '#fecdd3'}`,
+                color: '#dc2626',
+              }}>
               {bulkMode ? '✕ Cancel' : '🔒 Bulk Block'}
             </button>
           )}
           {showBulkUnblock && (
             <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
               className="px-4 py-2.5 rounded-xl text-sm font-medium"
-              style={{ background: bulkMode ? '#dcfce7' : '#f0fdf4', border: `1px solid ${bulkMode ? '#86efac' : '#bbf7d0'}`, color: '#16a34a' }}>
+              style={{
+                background: bulkMode ? '#dcfce7' : '#f0fdf4',
+                border: `1px solid ${bulkMode ? '#86efac' : '#bbf7d0'}`,
+                color: '#16a34a',
+              }}>
               {bulkMode ? '✕ Cancel' : '🔓 Bulk Unblock'}
             </button>
           )}
         </div>
 
+        {/* ── BULK ACTION BAR ── */}
         {bulkMode && (
           <div className="mb-3 flex items-center gap-3 flex-wrap px-4 py-3 rounded-xl"
             style={{ background: T.surface, border: `1px solid ${T.border}` }}>
             <span className="text-sm" style={{ color: T.textSub }}>{selectedMobiles.size} selected</span>
-            <button onClick={selectAll} className="text-xs font-medium hover:underline" style={{ color: T.accent }}>Select All Eligible</button>
-            <button onClick={() => setSelectedMobiles(new Set())} className="text-xs hover:underline" style={{ color: T.textMuted }}>Clear</button>
+            <button onClick={selectAll} className="text-xs font-medium hover:underline" style={{ color: T.accent }}>
+              Select All Eligible
+            </button>
+            <button onClick={() => setSelectedMobiles(new Set())} className="text-xs hover:underline" style={{ color: T.textMuted }}>
+              Clear
+            </button>
             <div className="ml-auto flex gap-2">
-              {showBulkBlock && <button onClick={handleBulkBlock} disabled={selectedMobiles.size === 0 || bulkLoading} className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40" style={{ background: '#dc2626', color: 'white' }}>{bulkLoading ? 'Blocking…' : `Block ${selectedMobiles.size}`}</button>}
-              {showBulkUnblock && <button onClick={handleBulkUnblock} disabled={selectedMobiles.size === 0 || bulkLoading} className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40" style={{ background: '#16a34a', color: 'white' }}>{bulkLoading ? 'Unblocking…' : `Unblock ${selectedMobiles.size}`}</button>}
+              {showBulkBlock && (
+                <button onClick={handleBulkBlock} disabled={selectedMobiles.size === 0 || bulkLoading}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                  style={{ background: '#dc2626', color: 'white' }}>
+                  {bulkLoading ? 'Blocking…' : `Block ${selectedMobiles.size}`}
+                </button>
+              )}
+              {showBulkUnblock && (
+                <button onClick={handleBulkUnblock} disabled={selectedMobiles.size === 0 || bulkLoading}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                  style={{ background: '#16a34a', color: 'white' }}>
+                  {bulkLoading ? 'Unblocking…' : `Unblock ${selectedMobiles.size}`}
+                </button>
+              )}
             </div>
           </div>
         )}
-        {bulkMode && showBulkBlock && <p className="text-[10px] mb-3" style={{ color: T.textMuted }}>⚠️ Only expired students with no pending dues can be bulk blocked.</p>}
+        {bulkMode && showBulkBlock && (
+          <p className="text-[10px] mb-3" style={{ color: T.textMuted }}>
+            ⚠️ Only expired students with no pending dues can be bulk blocked.
+          </p>
+        )}
 
+        {/* ── STUDENT LIST ── */}
         {loading && (
           <div className="text-center py-20">
-            <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3" style={{ borderColor: T.accent, borderTopColor: 'transparent' }}/>
+            <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
+              style={{ borderColor: T.accent, borderTopColor: 'transparent' }}/>
             <p className="text-sm" style={{ color: T.textMuted }}>Loading students…</p>
           </div>
         )}
@@ -642,31 +739,40 @@ export default function Home() {
 
         <div className="grid md:grid-cols-2 gap-3">
           {filtered.map((s) => {
-            const isEligibleForBulk = filter === 'blocked' ? true : (s.status?.toLowerCase().includes('expired') && !(s.total_due > 0))
+            const isEligibleForBulk = filter === 'blocked'
+              ? true
+              : (s.status?.toLowerCase().includes('expired') && !(s.total_due > 0))
             return (
-              <StudentCard key={s.mobile_number} s={s}
-                selectable={bulkMode && isEligibleForBulk} selected={selectedMobiles.has(s.mobile_number)}
-                onToggle={toggleSelect} onRenew={setRenewStudent} role={role}/>
+              <StudentCard
+                key={s.mobile_number}
+                s={s}
+                selectable={bulkMode && isEligibleForBulk}
+                selected={selectedMobiles.has(s.mobile_number)}
+                onToggle={toggleSelect}
+                onRenew={setRenewStudent}
+                role={role}/>
             )
           })}
         </div>
       </div>
 
+      {/* ── RENEW POPUP ── */}
       {renewStudent && (
-        <RenewPopup student={renewStudent} userName={userName}
+        <RenewPopup
+          student={renewStudent}
+          userName={userName}
           onClose={() => setRenewStudent(null)}
           onSuccess={() => { cachedStudents = null; fetchStudents(true) }}/>
       )}
 
-      {/* Custom confirm modal — mobile-safe replacement for window.confirm() */}
+      {/* ── CONFIRM MODAL ── */}
       {confirmModal && (
         <ConfirmModal
           message={confirmModal.message}
           confirmLabel={confirmModal.confirmLabel}
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
-          onCancel={() => setConfirmModal(null)}
-        />
+          onCancel={() => setConfirmModal(null)}/>
       )}
     </div>
   )
