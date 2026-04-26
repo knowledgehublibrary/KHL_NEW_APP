@@ -207,7 +207,7 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
       setError('Enter a valid positive amount'); return
     }
     if (!description.trim()) { setError('Please enter a description'); return }
-    if (type === 'Dr' && goesToBank === null) {
+    if (type === 'Cr' && goesToBank === null) {
       setError('Please specify if this amount goes to bank'); return
     }
     setSaving(true); setError('')
@@ -215,7 +215,7 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
     const amt = parseFloat(amount)
     const entries: { amount: number; type: string; description: string; created_by: string }[] = []
     entries.push({ amount: amt, type, description: description.trim(), created_by: userName })
-    if (type === 'Dr' && goesToBank === true) {
+    if (type === 'Cr' && goesToBank === true) {
       entries.push({ amount: amt, type: 'Dr', description: 'Bank', created_by: userName })
     }
 
@@ -309,7 +309,7 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
               style={inputBaseStyle}/>
           </div>
 
-          {type === 'Dr' && (
+          {type === 'Cr' && (
             <div className="mb-5">
               <label className={labelCls} style={{ color: T.textSub }}>Will this amount go to the bank?</label>
               <div className="grid grid-cols-2 gap-2">
