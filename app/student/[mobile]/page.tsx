@@ -87,6 +87,40 @@ function ActionBtn({ onClick, color, bg, border, children, disabled }: any) {
   )
 }
 
+// ─── iOS-SAFE MODAL WRAPPER ───────────────────────────────────────────────────
+function ModalSheet({ onClose, children, accentColor = T.accent }: {
+  onClose: () => void
+  children: React.ReactNode
+  accentColor?: string
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
+      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div
+        className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 44px))',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch' as any,
+          overscrollBehavior: 'contain',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}>
+        <div className="h-[3px] rounded-t-2xl"
+          style={{ background: `linear-gradient(90deg, transparent, ${accentColor}, transparent)` }}/>
+        {/* drag handle for mobile */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // ─── RENEW POPUP ──────────────────────────────────────────────────────────────
 function RenewPopup({ student, userName, onClose, onSuccess }: {
   student: any; userName: string; onClose: () => void; onSuccess: () => void
@@ -110,6 +144,9 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
   const [comment, setComment] = useState('')
   const now = new Date().toISOString()
 
+  const getMinFees = (m: string) => Math.round(500 * parseFloat(m || '1'))
+  const minFees = getMinFees(months)
+
   useEffect(() => {
     const fetchRegId = async () => {
       setRegIdLoading(true)
@@ -128,6 +165,41 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     setSelectedShifts(prev => prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift])
   }
 
+  // Real-time start date validation
+  const handleStartDateChange = (val: string) => {
+    setStartDate(val)
+    if (val && isDateOlderThan20Days(val)) {
+      setError('Start date cannot be older than 20 days from today')
+    } else if (error.includes('Start date')) {
+      setError('')
+    }
+  }
+
+  // Real-time fees validation
+  const handleFeesChange = (val: string) => {
+    setFinalFees(val)
+    setFeesSubmitted(val)
+    const parsed = parseFloat(val)
+    const currentMin = getMinFees(months)
+    if (val && !isNaN(parsed) && parsed < currentMin) {
+      setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
+    } else if (error.startsWith('Minimum fees')) {
+      setError('')
+    }
+  }
+
+  // Re-validate fees when months change
+  const handleMonthsChange = (val: string) => {
+    setMonths(val)
+    const currentMin = getMinFees(val)
+    const parsed = parseFloat(finalFees)
+    if (finalFees && !isNaN(parsed) && parsed < currentMin) {
+      setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
+    } else if (error.startsWith('Minimum fees')) {
+      setError('')
+    }
+  }
+
   const handleSubmit = async () => {
     if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
       setError('Please fill all required fields'); return
@@ -135,6 +207,8 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
     if (isDateOlderThan20Days(startDate)) { setError('Start date cannot be older than 20 days from today'); return }
+    const feesParsed = parseFloat(finalFees)
+    if (feesParsed < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
     if (!regId) { setError('Register ID not loaded. Please close and retry.'); return }
     setSaving(true); setError('')
 
@@ -142,7 +216,7 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
       timestamp: now, name: student.name, mobile_number: student.mobile_number,
       admission: 'Renew', address: null, gender: null, date_of_birth: null, aadhar_number: null, photo: null,
       start_date: startDate, months: parseFloat(months), seat, shift: selectedShifts.join(', '),
-      final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
+      final_fees: feesParsed, fees_submitted: parseFloat(feesSubmitted),
       mode, register_id: regId, comment: comment || null, created_by: userName,
     }
 
@@ -158,132 +232,151 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     onSuccess(); onClose()
   }
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text }
+  // font-size: 16px on all inputs prevents iOS auto-zoom
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
+  const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-        <div className="h-[3px] rounded-t-2xl"
-          style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-        <div className="p-6">
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>↺ Renew Membership</h2>
-              <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
-            </div>
-            <button onClick={onClose} className="text-xl" style={{ color: T.textMuted }}>✕</button>
+    <ModalSheet onClose={onClose}>
+      <div className="p-5 sm:p-6">
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>↺ Renew Membership</h2>
+            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
           </div>
+          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
+        </div>
 
-          <div className="mb-5 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
-            🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          </div>
+        <div className="mb-5 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
+          🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </div>
 
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Name</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Mobile</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div></div>
-          </div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div><label className={labelCls} style={{ color: T.textSub }}>Name</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div></div>
+          <div><label className={labelCls} style={{ color: T.textSub }}>Mobile</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div></div>
+        </div>
 
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
-              {regIdLoading ? <span className="animate-pulse" style={{ color: T.textMuted }}>Fetching…</span> : regId || '—'}
-            </div>
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setError(isDateOlderThan20Days(e.target.value) ? 'Start date cannot be older than 20 days' : '') }}
-              className={inputCls} style={inputStyle} />
-            <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Default: latest expiry. Cannot be older than 20 days.</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              <input type="number" value={months} onChange={(e) => setMonths(e.target.value)} min="1" className={inputCls} style={inputStyle} /></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle} /></div>
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Shift * (select all that apply)</label>
-            <div className="space-y-2">
-              {SHIFTS.map((shift) => {
-                const checked = selectedShifts.includes(shift)
-                return (
-                  <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
-                    style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
-                    <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                      style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
-                      {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </div>
-                    <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Final Fees *</label>
-              <input type="number" value={finalFees} onChange={(e) => { setFinalFees(e.target.value); setFeesSubmitted(e.target.value) }} className={inputCls} style={inputStyle} /></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle} />
-              <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Edit if partial payment</p></div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div><label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="Cash">Cash</option><option value="Online">Online</option>
-              </select></div>
-            <div><label className={labelCls} style={{ color: T.textSub }}>Admission</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div></div>
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-              placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
-          </div>
-
-          <div className="mb-5">
-            <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
-          </div>
-
-          {error && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-              <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-            <button onClick={handleSubmit} disabled={saving || regIdLoading}
-              className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-              style={{ background: T.accent, color: 'white' }}>
-              {saving ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                  </svg>Saving…
-                </span>
-              ) : '✓ Confirm Renewal'}
-            </button>
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
+            {regIdLoading ? <span className="animate-pulse" style={{ color: T.textMuted }}>Fetching…</span> : regId || '—'}
           </div>
         </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => handleStartDateChange(e.target.value)}
+            className={inputCls}
+            style={inputStyle}/>
+          <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Default: latest expiry. Cannot be older than 20 days.</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+            <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)} min="1" className={inputCls} style={inputStyle}/>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
+            <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle}/>
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Shift * (select all that apply)</label>
+          <div className="space-y-2">
+            {SHIFTS.map((shift) => {
+              const checked = selectedShifts.includes(shift)
+              return (
+                <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
+                  style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden"/>
+                  <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                    style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
+                    {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                  </div>
+                  <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>
+              Final Fees *
+              <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
+            </label>
+            <input
+              type="number"
+              value={finalFees}
+              onChange={(e) => handleFeesChange(e.target.value)}
+              className={inputCls}
+              style={inputStyle}/>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+            <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle}/>
+            <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Edit if partial payment</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
+            <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
+              <option value="Cash">Cash</option><option value="Online">Online</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div>
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+            placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle}/>
+        </div>
+
+        <div className="mb-5">
+          <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
+        </div>
+
+        {error && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+            style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+          <button onClick={handleSubmit} disabled={saving || regIdLoading}
+            className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+            style={{ background: T.accent, color: 'white' }}>
+            {saving ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>Saving…
+              </span>
+            ) : '✓ Confirm Renewal'}
+          </button>
+        </div>
       </div>
-    </div>
+    </ModalSheet>
   )
 }
 
@@ -323,67 +416,60 @@ function ChangeSeatPopup({ latestRecord, userName, onClose, onSuccess }: {
     onSuccess(); onClose()
   }
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text }
-  const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-      <div className="relative w-full max-w-sm rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-        <div className="h-[3px] rounded-t-2xl"
-          style={{ background: `linear-gradient(90deg, transparent, #6366f1, transparent)` }} />
-        <div className="p-6">
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>⇄ Change Seat</h2>
-              <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>One change allowed per registration</p>
-            </div>
-            <button onClick={onClose} className="text-xl" style={{ color: T.textMuted }}>✕</button>
+    <ModalSheet onClose={onClose} accentColor="#6366f1">
+      <div className="p-5 sm:p-6">
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>⇄ Change Seat</h2>
+            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>One change allowed per registration</p>
           </div>
+          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
+        </div>
 
-          <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
-            style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-medium mb-0.5" style={{ color: '#0284c7' }}>Reg ID</p>
-              <p className="text-sm font-semibold" style={{ color: '#0c4a6e' }}>{latestRecord?.register_id || '—'}</p>
-            </div>
-            <div className="w-px h-8 mx-2" style={{ background: '#bae6fd' }} />
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-medium mb-0.5" style={{ color: '#0284c7' }}>Current Seat</p>
-              <p className="text-sm font-semibold" style={{ color: '#0c4a6e' }}>{latestRecord?.seat ?? '—'}</p>
-            </div>
+        <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
+          style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+          <div>
+            <p className="text-[10px] uppercase tracking-widest font-medium mb-0.5" style={{ color: '#0284c7' }}>Reg ID</p>
+            <p className="text-sm font-semibold" style={{ color: '#0c4a6e' }}>{latestRecord?.register_id || '—'}</p>
           </div>
-
-          <div className="mb-5">
-            <label className="text-[10px] uppercase tracking-widest mb-1.5 block font-medium" style={{ color: T.textSub }}>
-              New Seat Number (0–92)
-            </label>
-            <input
-              type="number" value={newSeat} onChange={(e) => setNewSeat(e.target.value)} min="0" max="92"
-              placeholder="Enter new seat number"
-              className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-              style={inputStyle} />
-          </div>
-
-          {error && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-              <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-            <button onClick={handleSubmit} disabled={saving}
-              className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-              style={{ background: '#6366f1', color: 'white' }}>
-              {saving ? 'Saving…' : '✓ Confirm Change'}
-            </button>
+          <div className="w-px h-8 mx-2" style={{ background: '#bae6fd' }}/>
+          <div>
+            <p className="text-[10px] uppercase tracking-widest font-medium mb-0.5" style={{ color: '#0284c7' }}>Current Seat</p>
+            <p className="text-sm font-semibold" style={{ color: '#0c4a6e' }}>{latestRecord?.seat ?? '—'}</p>
           </div>
         </div>
+
+        <div className="mb-5">
+          <label className="text-[10px] uppercase tracking-widest mb-1.5 block font-medium" style={{ color: T.textSub }}>
+            New Seat Number (0–92)
+          </label>
+          <input
+            type="number" value={newSeat} onChange={(e) => setNewSeat(e.target.value)} min="0" max="92"
+            placeholder="Enter new seat number"
+            className="w-full px-3 py-2.5 rounded-xl focus:outline-none"
+            style={inputStyle}/>
+        </div>
+
+        {error && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+            style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+          <button onClick={handleSubmit} disabled={saving}
+            className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+            style={{ background: '#6366f1', color: 'white' }}>
+            {saving ? 'Saving…' : '✓ Confirm Change'}
+          </button>
+        </div>
       </div>
-    </div>
+    </ModalSheet>
   )
 }
 
@@ -404,7 +490,6 @@ export default function StudentDetail() {
   const [mode, setMode] = useState('Cash')
 
   const [isBlocked, setIsBlocked] = useState(false)
-  // Inline error for block/unblock actions — shown near the Quick Actions section
   const [blockError, setBlockError] = useState('')
 
   const [isFrozen, setIsFrozen] = useState(false)
@@ -462,11 +547,8 @@ export default function StudentDetail() {
 
   async function handleBlockToggle() {
     const totalDue = data.reduce((s, r) => s + (r.due_fees || 0), 0)
-
-    // Inline error instead of alert() — visible on mobile without dialog
     if (!isBlocked && totalDue > 0) {
       setBlockError(`Cannot block: this student has ₹${totalDue} in pending dues. Clear dues first.`)
-      // Auto-dismiss after 5 seconds
       setTimeout(() => setBlockError(''), 5000)
       return
     }
@@ -518,7 +600,7 @@ export default function StudentDetail() {
     <div className="min-h-screen flex items-center justify-center" style={{ background: T.bg }}>
       <div className="text-center">
         <div className="inline-block w-8 h-8 border-2 rounded-full animate-spin mb-3"
-          style={{ borderColor: T.accent, borderTopColor: 'transparent' }} />
+          style={{ borderColor: T.accent, borderTopColor: 'transparent' }}/>
         <p className="text-sm" style={{ color: T.textMuted }}>Loading student…</p>
       </div>
     </div>
@@ -549,9 +631,8 @@ export default function StudentDetail() {
   const whatsappLink = getWhatsappLink(student.name, mobile, totalDue, latestRecord?.expiry)
   const isActive = latestRecord?.status?.toLowerCase().includes('active')
 
-  // admin, manager, partner all get privileged actions
   const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canRenew = isPrivileged && isExpired  && !isBlocked
+  const canRenew = isPrivileged && isExpired && !isBlocked
   const canFreeze = isPrivileged && isActive && !hasDue && !hasEverFrozen
   const canUnfreeze = isPrivileged && isFrozen
   const canChangeSeat = isPrivileged && isActive && !seatAlreadyChanged
@@ -573,18 +654,25 @@ export default function StudentDetail() {
         <div className="flex justify-center">
           <img src={getProxyUrl(student.photo) || '/default-avatar.png'}
             onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
-            className="max-h-[90vh] rounded-xl" />
+            className="max-h-[90vh] rounded-xl"/>
         </div>
       </div>
     )
   }
 
+  // Shared input style with iOS zoom prevention
+  const iosInputStyle: React.CSSProperties = {
+    background: T.bg,
+    border: `1px solid ${T.border}`,
+    color: T.text,
+    fontSize: '16px',
+  }
+
   return (
     <div className="min-h-screen" style={{ background: T.bg }}>
-      <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }} />
+      <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }}/>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
-        {/* Back */}
         <button onClick={() => router.back()}
           className="mb-6 flex items-center gap-1.5 text-sm font-medium transition-colors hover:opacity-70"
           style={{ color: T.textSub }}>
@@ -593,20 +681,19 @@ export default function StudentDetail() {
 
         {/* ── PROFILE CARD ── */}
         <div className="rounded-2xl overflow-hidden mb-4" style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          <div className="h-[3px]" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-
+          <div className="h-[3px]" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
           <div className="p-5 flex items-start gap-5 flex-wrap">
             <div className="relative shrink-0">
               <img src={getProxyUrl(student.photo) || '/default-avatar.png'}
                 onClick={() => student.photo && setShowImageView(true)}
                 onError={(e) => (e.currentTarget.src = '/default-avatar.png')}
                 className="w-20 h-20 rounded-2xl object-cover cursor-pointer"
-                style={{ border: `2px solid ${T.border}` }} />
+                style={{ border: `2px solid ${T.border}` }}/>
               <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 rounded-full border-2"
                 style={{
                   borderColor: T.surface,
                   background: isActive ? '#16a34a' : isBlocked ? '#9ca3af' : isFrozen ? '#0ea5e9' : '#dc2626'
-                }} />
+                }}/>
             </div>
 
             <div className="flex-1 min-w-0">
@@ -629,7 +716,7 @@ export default function StudentDetail() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <StatusBadge status={latestRecord?.status} />
+                  <StatusBadge status={latestRecord?.status}/>
                   <span className="text-[10px] font-medium px-2.5 py-1 rounded-full"
                     style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textSub }}>
                     Exp: {formatDate(latestRecord?.expiry)}
@@ -671,42 +758,36 @@ export default function StudentDetail() {
         <div className="rounded-2xl p-4 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <p className="text-[10px] uppercase tracking-widest font-medium mb-3" style={{ color: T.textMuted }}>Quick Actions</p>
           <div className="flex gap-2 flex-wrap">
-
             {isPrivileged && hasDue && (
               <ActionBtn onClick={() => { setDueAmount(totalDue); setShowDuePopup(true) }}
                 color="#1d4ed8" bg="#eff6ff" border="#bfdbfe">
                 💰 Submit Due
               </ActionBtn>
             )}
-
             {canRenew && (
               <ActionBtn onClick={() => setShowRenewPopup(true)}
                 color="white" bg={T.accent} border={T.accent}>
                 ↺ Renew
               </ActionBtn>
             )}
-
             {canChangeSeat && (
               <ActionBtn onClick={() => setShowSeatPopup(true)}
                 color="#5b21b6" bg="#f5f3ff" border="#ddd6fe">
                 ⇄ Change Seat
               </ActionBtn>
             )}
-
             {canFreeze && (
               <ActionBtn onClick={() => setShowFreezePopup(true)}
                 color="#92400e" bg="#fffbeb" border="#fde68a">
                 ❄ Freeze
               </ActionBtn>
             )}
-
             {canUnfreeze && (
               <ActionBtn onClick={() => setShowFreezePopup(true)}
                 color="white" bg="#16a34a" border="#16a34a">
                 ✓ Unfreeze
               </ActionBtn>
             )}
-
             {isPrivileged && (
               <ActionBtn onClick={handleBlockToggle}
                 color={isBlocked ? '#166534' : '#991b1b'}
@@ -715,10 +796,8 @@ export default function StudentDetail() {
                 {isBlocked ? '🔓 Unblock' : '🔒 Block'}
               </ActionBtn>
             )}
-
           </div>
 
-          {/* Inline block error — visible on mobile, no dialog needed */}
           {blockError && (
             <div className="mt-3 px-4 py-2.5 rounded-xl flex items-start gap-2"
               style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
@@ -762,7 +841,7 @@ export default function StudentDetail() {
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: T.text }}>₹{row.final_fees}</td>
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>₹{row.fees_submitted || 0}</td>
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees > 0 ? '#dc2626' : T.textMuted }}>₹{row.due_fees || 0}</td>
-                      <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                      <td className="px-4 py-3"><StatusBadge status={row.status}/></td>
                     </tr>
                   ))}
               </tbody>
@@ -773,100 +852,87 @@ export default function StudentDetail() {
 
       {/* ── SUBMIT DUE POPUP ── */}
       {showDuePopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full max-w-sm rounded-2xl shadow-2xl" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-            <div className="h-[3px] rounded-t-2xl" style={{ background: 'linear-gradient(90deg, transparent, #2563eb, transparent)' }} />
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-5">
-                <h2 className="font-bold text-lg" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>💰 Submit Due</h2>
-                <button onClick={() => setShowDuePopup(false)} style={{ color: T.textMuted }}>✕</button>
+        <ModalSheet onClose={() => setShowDuePopup(false)} accentColor="#2563eb">
+          <div className="p-5 sm:p-6">
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="font-bold text-lg" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>💰 Submit Due</h2>
+              <button onClick={() => setShowDuePopup(false)} style={{ color: T.textMuted }}>✕</button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>Amount</label>
+                <input type="number" value={dueAmount} onChange={(e) => setDueAmount(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl focus:outline-none"
+                  style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }}/>
               </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>Amount</label>
-                  <input type="number" value={dueAmount} onChange={(e) => setDueAmount(Number(e.target.value))}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                    style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text }} />
-                </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>Date</label>
-                  <div className="px-3 py-2.5 rounded-xl text-sm" style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }}>
-                    {formatDateForDB()}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>Mode</label>
-                  <select value={mode} onChange={(e) => setMode(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none appearance-none"
-                    style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text }}>
-                    <option>Cash</option><option>Online</option>
-                  </select>
+              <div>
+                <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>Date</label>
+                <div className="px-3 py-2.5 rounded-xl text-sm" style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }}>
+                  {formatDateForDB()}
                 </div>
               </div>
-
-              <div className="flex gap-3 mt-5">
-                <button onClick={() => setShowDuePopup(false)} className="flex-1 py-3 rounded-xl text-sm"
-                  style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-                <button onClick={submitDue} className="flex-1 py-3 rounded-xl text-sm font-semibold"
-                  style={{ background: '#2563eb', color: 'white' }}>✓ Submit</button>
+              <div>
+                <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>Mode</label>
+                <select value={mode} onChange={(e) => setMode(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl focus:outline-none appearance-none"
+                  style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }}>
+                  <option>Cash</option><option>Online</option>
+                </select>
               </div>
             </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setShowDuePopup(false)} className="flex-1 py-3 rounded-xl text-sm"
+                style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+              <button onClick={submitDue} className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                style={{ background: '#2563eb', color: 'white' }}>✓ Submit</button>
+            </div>
           </div>
-        </div>
+        </ModalSheet>
       )}
 
       {/* ── FREEZE POPUP ── */}
       {showFreezePopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full max-w-sm rounded-2xl shadow-2xl" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-            <div className="h-[3px] rounded-t-2xl"
-              style={{ background: `linear-gradient(90deg, transparent, ${isFrozen ? '#16a34a' : '#f59e0b'}, transparent)` }} />
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-5">
-                <h2 className="font-bold text-lg" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
-                  {isFrozen ? '✓ Unfreeze Student' : '❄ Freeze Student'}
-                </h2>
-                <button onClick={() => setShowFreezePopup(false)} style={{ color: T.textMuted }}>✕</button>
-              </div>
-              <div className="mb-5">
-                <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>
-                  {isFrozen ? 'Unfreeze Date' : 'Freeze Date'}
-                </label>
-                <input value={freezeDate} onChange={(e) => setFreezeDate(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                  style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text }} />
-              </div>
-              <div className="flex gap-3">
-                <button onClick={() => setShowFreezePopup(false)} className="flex-1 py-3 rounded-xl text-sm"
-                  style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-                {!isFrozen ? (
-                  <button onClick={handleFreeze} className="flex-1 py-3 rounded-xl text-sm font-semibold"
-                    style={{ background: '#f59e0b', color: 'white' }}>❄ Freeze</button>
-                ) : (
-                  <button onClick={handleUnfreeze} className="flex-1 py-3 rounded-xl text-sm font-semibold"
-                    style={{ background: '#16a34a', color: 'white' }}>✓ Unfreeze</button>
-                )}
-              </div>
+        <ModalSheet onClose={() => setShowFreezePopup(false)} accentColor={isFrozen ? '#16a34a' : '#f59e0b'}>
+          <div className="p-5 sm:p-6">
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="font-bold text-lg" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+                {isFrozen ? '✓ Unfreeze Student' : '❄ Freeze Student'}
+              </h2>
+              <button onClick={() => setShowFreezePopup(false)} style={{ color: T.textMuted }}>✕</button>
+            </div>
+            <div className="mb-5">
+              <label className="text-[10px] uppercase tracking-widest font-medium mb-1.5 block" style={{ color: T.textSub }}>
+                {isFrozen ? 'Unfreeze Date' : 'Freeze Date'}
+              </label>
+              <input value={freezeDate} onChange={(e) => setFreezeDate(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl focus:outline-none"
+                style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }}/>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setShowFreezePopup(false)} className="flex-1 py-3 rounded-xl text-sm"
+                style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+              {!isFrozen ? (
+                <button onClick={handleFreeze} className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#f59e0b', color: 'white' }}>❄ Freeze</button>
+              ) : (
+                <button onClick={handleUnfreeze} className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#16a34a', color: 'white' }}>✓ Unfreeze</button>
+              )}
             </div>
           </div>
-        </div>
+        </ModalSheet>
       )}
 
-      {/* ── RENEW POPUP ── */}
       {showRenewPopup && (
         <RenewPopup student={renewStudentObj} userName={userName}
           onClose={() => setShowRenewPopup(false)}
-          onSuccess={() => fetchStudent()} />
+          onSuccess={() => fetchStudent()}/>
       )}
 
-      {/* ── CHANGE SEAT POPUP ── */}
       {showSeatPopup && (
         <ChangeSeatPopup latestRecord={latestRecord} userName={userName}
           onClose={() => setShowSeatPopup(false)}
-          onSuccess={() => { fetchStudent(); setSeatAlreadyChanged(true) }} />
+          onSuccess={() => { fetchStudent(); setSeatAlreadyChanged(true) }}/>
       )}
     </div>
   )

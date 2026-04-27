@@ -24,7 +24,6 @@ function formatDateTime(date: string) {
   return new Date(date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-/** Returns a date string YYYY-MM-DD for N days ago */
 function daysAgo(n: number) {
   const d = new Date()
   d.setDate(d.getDate() - n)
@@ -46,17 +45,13 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Admin override: fetch all staff names from profiles
   const [staffList, setStaffList] = useState<string[]>([])
   const [createdBy, setCreatedBy] = useState(userName)
 
   useEffect(() => {
     if (role !== 'admin') return
     const fetchStaff = async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('name')
-        .order('name')
+      const { data } = await supabase.from('profiles').select('name').order('name')
       if (data) setStaffList(data.map((p: any) => p.name).filter(Boolean))
     }
     fetchStaff()
@@ -67,7 +62,6 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
   const handleSubmit = async () => {
     if (!description.trim()) { setError('Description is required'); return }
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) { setError('Enter a valid amount'); return }
-
     setSaving(true); setError('')
     const { error: insertError } = await supabase
       .schema('library_management')
@@ -78,29 +72,44 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
         Mode: mode,
         Created_by: createdBy,
       }])
-
     if (insertError) { setError(insertError.message); setSaving(false); return }
     onSuccess(); onClose()
   }
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text }
+  // iOS: font-size 16px prevents zoom on focus
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
+  const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-      <div className="relative w-full max-w-md rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
+      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div
+        className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 44px))',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch' as any,
+          overscrollBehavior: 'contain',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}>
         <div className="h-[3px] rounded-t-2xl" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-        <div className="p-6">
+        {/* drag handle for mobile */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
+        </div>
+        <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between mb-6">
             <div>
               <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Add Expense</h2>
               <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
             </div>
-            <button onClick={onClose} className="text-xl" style={{ color: T.textMuted }}>✕</button>
+            <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
           </div>
 
           <div className="mb-4 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
@@ -130,7 +139,6 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
             </div>
           </div>
 
-          {/* Recorded By — dropdown for admin, readonly for everyone else */}
           <div className="mb-5">
             {role === 'admin' ? (
               <>
@@ -141,12 +149,8 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
                     Admin Override
                   </span>
                 </label>
-                <select
-                  value={createdBy}
-                  onChange={(e) => setCreatedBy(e.target.value)}
-                  className={inputCls + ' appearance-none'}
-                  style={inputStyle}>
-                  {/* Logged-in user always first */}
+                <select value={createdBy} onChange={(e) => setCreatedBy(e.target.value)}
+                  className={inputCls + ' appearance-none'} style={inputStyle}>
                   {[userName, ...staffList.filter(n => n !== userName)].map(name => (
                     <option key={name} value={name}>{name}</option>
                   ))}
@@ -200,7 +204,6 @@ export default function ExpensesPage() {
   const [role, setRole] = useState('')
   const [showModal, setShowModal] = useState(false)
 
-  // For manager the from-date is locked to 7 days ago
   const isManagerRestricted = role === 'manager'
   const managerMinDate = daysAgo(7)
 
@@ -217,9 +220,7 @@ export default function ExpensesPage() {
       const r = profile?.role || ''
       setUserName(profile?.name || '')
       setRole(r)
-      // admin, manager, partner can access expenses; everyone else is redirected
       if (r !== 'admin' && r !== 'manager' && r !== 'partner') { router.push('/'); return }
-      // Manager can only see last 7 days — default the from-date
       if (r === 'manager') setAfterDate(daysAgo(7))
       fetchExpenses()
     }
@@ -238,7 +239,6 @@ export default function ExpensesPage() {
   }
 
   const filtered = useMemo(() => {
-    // For manager: always enforce 7-day minimum regardless of their filter input
     const effectiveAfter = isManagerRestricted
       ? (afterDate && afterDate > managerMinDate ? afterDate : managerMinDate)
       : afterDate
@@ -254,10 +254,7 @@ export default function ExpensesPage() {
       }
       if (searchText) {
         const q = searchText.toLowerCase()
-        if (
-          !row.Description?.toLowerCase().includes(q) &&
-          !row.Created_by?.toLowerCase().includes(q)
-        ) return false
+        if (!row.Description?.toLowerCase().includes(q) && !row.Created_by?.toLowerCase().includes(q)) return false
       }
       if (modeFilter !== 'all') {
         if (row.Mode !== modeFilter) return false
@@ -278,7 +275,9 @@ export default function ExpensesPage() {
   }, [filtered])
 
   const hasFilters = (isManagerRestricted ? afterDate !== managerMinDate : !!afterDate) || beforeDate || searchText || modeFilter !== 'all'
-  const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text }
+
+  // iOS: font-size 16px on all filter inputs
+  const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const labelCls = "text-[10px] uppercase tracking-widest font-medium mb-1.5 block"
 
   return (
@@ -316,11 +315,10 @@ export default function ExpensesPage() {
           </button>
         </div>
 
-        {/* FILTER PANEL */}
-        <div className="rounded-2xl p-5 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        {/* FILTER PANEL — fixed for iOS: single-col on mobile, 2-col on sm, 5-col on md+ */}
+        <div className="rounded-2xl p-4 sm:p-5 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>Filters</p>
 
-          {/* Manager restriction notice */}
           {isManagerRestricted && (
             <div className="mb-4 px-3 py-2 rounded-xl flex items-center gap-2"
               style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
@@ -329,7 +327,8 @@ export default function ExpensesPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {/* Grid: 1 col on mobile, 2 on sm, 5 on md — prevents iOS horizontal overflow */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>From</label>
               {isManagerRestricted ? (
@@ -339,29 +338,30 @@ export default function ExpensesPage() {
                 </div>
               ) : (
                 <input type="date" value={afterDate} onChange={(e) => setAfterDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                  className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
               )}
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>To</label>
               <div className="relative">
                 <input type="date" value={beforeDate} onChange={(e) => setBeforeDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                  className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
                 {beforeDate && (
                   <button onClick={() => setBeforeDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.textMuted }}>✕</button>
                 )}
               </div>
             </div>
-            <div className="col-span-2">
+            {/* Search spans 2 cols on sm to fill the row nicely */}
+            <div className="sm:col-span-2 md:col-span-2">
               <label className={labelCls} style={{ color: T.textSub }}>Search</label>
               <input type="text" placeholder="Description or recorded by…" value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Mode</label>
               <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none appearance-none" style={inputStyle}>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none appearance-none" style={inputStyle}>
                 <option value="all">All</option>
                 <option value="Cash">Cash</option>
                 <option value="Online">Online</option>

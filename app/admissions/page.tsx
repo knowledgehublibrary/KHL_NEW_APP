@@ -64,7 +64,6 @@ export default function AdmissionsPage() {
       if (!sessionData.session) { router.push('/login'); return }
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', sessionData.session.user.id).single()
       const r = profile?.role || ''
-      // Only admin and partner can access the ledger; manager and viewer cannot
       if (r !== 'admin' && r !== 'partner') { router.push('/'); return }
       fetchAllData()
     }
@@ -167,7 +166,8 @@ export default function AdmissionsPage() {
     }
   }, [filtered, afterDate, beforeDate])
 
-  const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text }
+  // iOS: font-size 16px prevents zoom
+  const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const selectStyle: React.CSSProperties = { ...inputStyle, appearance: 'none' as any }
   const labelCls = "text-[10px] uppercase tracking-widest font-medium mb-1.5 block"
   const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
@@ -194,36 +194,37 @@ export default function AdmissionsPage() {
             style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>↻ Refresh</button>
         </div>
 
-        {/* FILTER PANEL */}
-        <div className="rounded-2xl p-5 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        {/* FILTER PANEL — iOS-safe: 1 col mobile → 2 col sm → 4 col md → 8 col lg */}
+        <div className="rounded-2xl p-4 sm:p-5 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <p className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: T.textMuted }}>Filters</p>
           <p className="text-[10px] mb-4 leading-relaxed" style={{ color: T.textMuted }}>
-            📅 Date range filters on <span style={{ color: T.textSub, fontWeight: 600 }}>admission recorded date</span>. Rows where a <span style={{ color: T.textSub, fontWeight: 600 }}>due payment date</span> falls in the same range are also included — their due amount is summed separately in the cards above.
+            📅 Date range filters on <span style={{ color: T.textSub, fontWeight: 600 }}>admission recorded date</span>. Rows where a <span style={{ color: T.textSub, fontWeight: 600 }}>due payment date</span> falls in the same range are also included.
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-            <div className="col-span-2 md:col-span-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+            <div className="sm:col-span-1">
               <label className={labelCls} style={{ color: T.textSub }}>From</label>
               <input type="date" value={afterDate} onChange={(e) => setAfterDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
             </div>
-            <div className="col-span-2 md:col-span-1">
+            <div className="sm:col-span-1">
               <label className={labelCls} style={{ color: T.textSub }}>To</label>
               <div className="relative">
                 <input type="date" value={beforeDate} onChange={(e) => setBeforeDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                  className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
                 {beforeDate && <button onClick={() => setBeforeDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: T.textMuted }}>✕</button>}
               </div>
             </div>
-            <div className="col-span-2">
+            {/* Search spans 2 cols on sm, 2 on md, 2 on lg */}
+            <div className="sm:col-span-2">
               <label className={labelCls} style={{ color: T.textSub }}>Search</label>
               <input type="text" placeholder="Name, mobile or reg ID…" value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={inputStyle}/>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Status</label>
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={selectStyle}>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={selectStyle}>
                 <option value="all">All</option>
                 <option value="active">Active</option>
                 <option value="expired">Expired</option>
@@ -235,7 +236,7 @@ export default function AdmissionsPage() {
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Shift</label>
               <select value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={selectStyle}>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={selectStyle}>
                 <option value="all">All</option>
                 {SHIFTS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -243,7 +244,7 @@ export default function AdmissionsPage() {
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Type</label>
               <select value={admissionFilter} onChange={(e) => setAdmissionFilter(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={selectStyle}>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={selectStyle}>
                 <option value="all">All</option>
                 <option value="New">New</option>
                 <option value="Renew">Renew</option>
@@ -252,7 +253,7 @@ export default function AdmissionsPage() {
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Mode</label>
               <select value={modeFilter} onChange={(e) => setModeFilter(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none" style={selectStyle}>
+                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={selectStyle}>
                 <option value="all">All</option>
                 <option value="Cash">Cash</option>
                 <option value="Online">Online</option>

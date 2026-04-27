@@ -49,10 +49,14 @@ function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onCon
   message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void
 }) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4"
       style={{ background: 'rgba(28,25,23,0.6)', backdropFilter: 'blur(4px)' }}>
-      <div className="w-full max-w-xs rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+      <div className="w-full sm:max-w-xs rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}>
         <div className="h-[3px] rounded-t-2xl"
           style={{ background: `linear-gradient(90deg, transparent, ${danger ? '#dc2626' : T.accent}, transparent)` }}/>
         <div className="p-6">
@@ -276,6 +280,38 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
   const toggleShift = (shift: string) =>
     setSelectedShifts(prev => prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift])
 
+  const handleStartDateChange = (val: string) => {
+    setStartDate(val)
+    if (isDateOlderThan20Days(val)) {
+      setError('Start date cannot be older than 20 days')
+    } else {
+      setError('')
+    }
+  }
+
+  const handleFeesChange = (val: string) => {
+    setFinalFees(val)
+    setFeesSubmitted(val)
+    const parsed = parseFloat(val)
+    const currentMin = Math.round(500 * parseFloat(months || '1'))
+    if (!isNaN(parsed) && parsed < currentMin) {
+      setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
+    } else if (error.startsWith('Minimum fees')) {
+      setError('')
+    }
+  }
+
+  const handleMonthsChange = (val: string) => {
+    setMonths(val)
+    const currentMin = Math.round(500 * parseFloat(val || '1'))
+    const parsed = parseFloat(finalFees)
+    if (!isNaN(parsed) && parsed < currentMin) {
+      setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
+    } else if (error.startsWith('Minimum fees')) {
+      setError('')
+    }
+  }
+
   const handleSubmit = async () => {
     if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
       setError('Please fill all required fields'); return
@@ -302,24 +338,47 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
     onSuccess(); onClose()
   }
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text }
+  // iOS-safe input style — font-size 16px prevents zoom
+  const inputStyle: React.CSSProperties = {
+    background: T.bg,
+    border: `1px solid ${T.border}`,
+    color: T.text,
+    fontSize: '16px',
+  }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
+  const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
+      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div
+        className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 20px))',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch' as any,
+          overscrollBehavior: 'contain',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}>
         <div className="h-[3px] rounded-t-2xl" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-        <div className="p-6">
-          <div className="flex items-start justify-between mb-6">
+
+        {/* Drag handle on mobile */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
+        </div>
+
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between mb-5">
             <div>
               <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Renew Membership</h2>
               <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
             </div>
-            <button onClick={onClose} className="text-xl" style={{ color: T.textMuted }}>✕</button>
+            <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
           </div>
           <div className="mb-5 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
             🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -342,18 +401,34 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
           </div>
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-            <input type="date" value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setError(isDateOlderThan20Days(e.target.value) ? 'Start date cannot be older than 20 days' : '') }}
-              className={inputCls} style={inputStyle}/>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+              className={inputCls}
+              style={inputStyle}/>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              <input type="number" value={months} onChange={(e) => setMonths(e.target.value)} min="1" className={inputCls} style={inputStyle}/>
+              <input
+                type="number"
+                value={months}
+                onChange={(e) => handleMonthsChange(e.target.value)}
+                min="1"
+                className={inputCls}
+                style={inputStyle}/>
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle}/>
+              <input
+                type="number"
+                value={seat}
+                onChange={(e) => setSeat(e.target.value)}
+                min="0"
+                max="92"
+                className={inputCls}
+                style={inputStyle}/>
             </div>
           </div>
           <div className="mb-4">
@@ -377,12 +452,25 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Final Fees *</label>
-              <input type="number" value={finalFees} onChange={(e) => { setFinalFees(e.target.value); setFeesSubmitted(e.target.value) }} className={inputCls} style={inputStyle}/>
+              <label className={labelCls} style={{ color: T.textSub }}>
+                Final Fees *
+                {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
+              </label>
+              <input
+                type="number"
+                value={finalFees}
+                onChange={(e) => handleFeesChange(e.target.value)}
+                className={inputCls}
+                style={inputStyle}/>
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle}/>
+              <input
+                type="number"
+                value={feesSubmitted}
+                onChange={(e) => setFeesSubmitted(e.target.value)}
+                className={inputCls}
+                style={inputStyle}/>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -552,7 +640,6 @@ export default function Home() {
     })
   }
 
-  // Role helpers
   const isPrivileged  = role === 'admin' || role === 'manager' || role === 'partner'
   const canSeeLedger  = role === 'admin' || role === 'partner'
   const showBulkBlock   = isPrivileged && filter === 'expired'
@@ -583,7 +670,6 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Seat Map — visible to all */}
             <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
               style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
               🗺️ Seat Map
@@ -591,7 +677,6 @@ export default function Home() {
 
             {isPrivileged && (
               <>
-                {/* Ledger — admin + partner only */}
                 {canSeeLedger && (
                   <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
                     style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
@@ -599,7 +684,6 @@ export default function Home() {
                   </Link>
                 )}
 
-                {/* Admin Ledger — admin only */}
                 {role === 'admin' && (
                   <Link href="/admin_ledger" className="px-3 py-2 rounded-xl text-xs font-medium"
                     style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
@@ -607,7 +691,6 @@ export default function Home() {
                   </Link>
                 )}
 
-                {/* Expenses — admin, manager, partner */}
                 <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
                   style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
                   💸 Expenses
@@ -658,8 +741,13 @@ export default function Home() {
           <input
             type="text"
             placeholder="Search by name or mobile…"
-            className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl text-sm focus:outline-none"
-            style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text }}
+            className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl focus:outline-none"
+            style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              color: T.text,
+              fontSize: '16px', // prevents iOS zoom
+            }}
             onFocus={e => (e.currentTarget.style.borderColor = T.accent)}
             onBlur={e => (e.currentTarget.style.borderColor = T.border)}
             onChange={(e) => setSearchInput(e.target.value)}/>
@@ -756,7 +844,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── RENEW POPUP ── */}
       {renewStudent && (
         <RenewPopup
           student={renewStudent}
@@ -765,7 +852,6 @@ export default function Home() {
           onSuccess={() => { cachedStudents = null; fetchStudents(true) }}/>
       )}
 
-      {/* ── CONFIRM MODAL ── */}
       {confirmModal && (
         <ConfirmModal
           message={confirmModal.message}
