@@ -308,7 +308,7 @@ export default function LoginPage() {
         )}
 
         <p className="text-center mt-6" style={{ color: T.textMuted, fontSize: '11px' }}>
-          Knowledge Hub · Library Management
+          Knowledge Hub Library Management App
         </p>
       </div>
     </div>
