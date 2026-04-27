@@ -128,7 +128,7 @@ export default function LoginPage() {
             <span style={{ fontSize: '28px' }}>📚</span>
           </div>
           <h1 className="font-bold mb-1" style={{ fontFamily: "'Georgia', serif", fontSize: '24px', color: T.text, letterSpacing: '-0.3px' }}>
-            Knowledge Hub
+            Knowledge Hub Library
           </h1>
           <p style={{ color: T.textMuted, fontSize: '10px', letterSpacing: '0.25em', textTransform: 'uppercase' }}>
             Library Management System
@@ -150,7 +150,7 @@ export default function LoginPage() {
 
             <div className="mb-4">
               <label style={labelStyle}>Email</label>
-              <input ref={emailRef} type="email" placeholder="you@example.com"
+              <input ref={emailRef} type="email" placeholder="you@khl.com"
                 value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={handleKeyDown}
                 className={inputCls} style={inputBase}
                 onFocus={e => { e.currentTarget.style.borderColor = T.accent; e.currentTarget.style.boxShadow = `0 0 0 3px ${T.accentLight}` }}
