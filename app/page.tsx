@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo, useTransition, memo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useTransition, memo, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -443,44 +443,90 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
 }
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
+// ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
+// Drop-in replacement for NewAdmissionPopup in your page.tsx
+// Changes:
+//   1. sessionStorage draft: all fields auto-saved, restored on open, cleared on success
+//   2. Photo: "Verify Photo" starts 40s countdown, then polls every 5s up to 4 mins
+//      Shows preview using lh3.googleusercontent.com/d/{id} conversion
+//      Stores original Drive URL unchanged in DB
+
+const DRAFT_KEY = 'new_admission_draft'
+
+function getDrivePreviewUrl(driveUrl: string): string {
+  // Converts https://drive.google.com/open?id=FILE_ID
+  // to       https://lh3.googleusercontent.com/d/FILE_ID
+  if (!driveUrl) return ''
+  try {
+    // handle both ?id= and /d/ formats
+    const idMatch = driveUrl.match(/[?&]id=([^&]+)/) || driveUrl.match(/\/d\/([^/]+)/)
+    if (idMatch?.[1]) return `https://lh3.googleusercontent.com/d/${idMatch[1]}`
+  } catch {}
+  return driveUrl
+}
+
+function loadDraft(): Record<string, any> {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function saveDraft(patch: Record<string, any>) {
+  try {
+    const current = loadDraft()
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ ...current, ...patch }))
+  } catch {}
+}
+
+function clearDraft() {
+  try { sessionStorage.removeItem(DRAFT_KEY) } catch {}
+}
+
 function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   userName: string; onClose: () => void; onSuccess: () => void
 }) {
+  const draft = loadDraft()
+
   const [regId, setRegId] = useState('')
   const [regIdLoading, setRegIdLoading] = useState(true)
 
-  // Photo — moved to bottom, state still here
+  // Photo state
   const [photoVerified, setPhotoVerified] = useState(false)
-  const [photoUrl, setPhotoUrl] = useState('')
-  const [photoChecking, setPhotoChecking] = useState(false)
+  const [photoUrl, setPhotoUrl] = useState('')           // original Drive URL → stored in DB
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState('') // lh3 URL → only for display
+  const [photoPhase, setPhotoPhase] = useState<'idle' | 'countdown' | 'polling' | 'done' | 'failed'>('idle')
+  const [photoCountdown, setPhotoCountdown] = useState(30)  // seconds before first poll
+  const [pollCountdown, setPollCountdown] = useState(5)     // seconds between polls
   const [photoError, setPhotoError] = useState('')
+  const pollingRef = useRef<{ stop: () => void } | null>(null)
 
-  // Personal
-  const [name, setName] = useState('')
-  const [mobile, setMobile] = useState('')
-  const [mobileError, setMobileError] = useState('') // hard block — not a warning
-  const [address, setAddress] = useState('')
-  const [gender, setGender] = useState('')
-  const [dob, setDob] = useState('')           // now required
-  const [aadhar, setAadhar] = useState('')
+  // Personal — restored from draft
+  const [name, setName]       = useState(draft.name || '')
+  const [mobile, setMobile]   = useState(draft.mobile || '')
+  const [mobileError, setMobileError] = useState('')
+  const [address, setAddress] = useState(draft.address || '')
+  const [gender, setGender]   = useState(draft.gender || '')
+  const [dob, setDob]         = useState(draft.dob || '')
+  const [aadhar, setAadhar]   = useState(draft.aadhar || '')
 
-  // Admission
-  // ── CHANGES: fees default 500, all shifts selected, seat default '0'
+  // Admission — restored from draft
   const now = new Date().toISOString()
-  const [startDate, setStartDate] = useState(toInputDate(now))
-  const [months, setMonths] = useState('1')
-  const [seat, setSeat] = useState('0')                          // default 0
-  const [selectedShifts, setSelectedShifts] = useState<string[]>([...SHIFTS]) // all selected
-  const [finalFees, setFinalFees] = useState('500')              // default 500
-  const [feesSubmitted, setFeesSubmitted] = useState('500')      // mirrors finalFees
-  const [mode, setMode] = useState('Cash')
-  const [comment, setComment] = useState('')
+  const [startDate, setStartDate]         = useState(draft.startDate || toInputDate(now))
+  const [months, setMonths]               = useState(draft.months || '1')
+  const [seat, setSeat]                   = useState(draft.seat ?? '0')
+  const [selectedShifts, setSelectedShifts] = useState<string[]>(draft.selectedShifts || [...SHIFTS])
+  const [finalFees, setFinalFees]         = useState(draft.finalFees || '500')
+  const [feesSubmitted, setFeesSubmitted] = useState(draft.feesSubmitted || '500')
+  const [mode, setMode]                   = useState(draft.mode || 'Cash')
+  const [comment, setComment]             = useState(draft.comment || '')
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const minFees = Math.round(500 * parseFloat(months || '1'))
 
+  // ── Fetch fresh regId on every open (never from draft)
   useEffect(() => {
     const fetchRegId = async () => {
       setRegIdLoading(true)
@@ -498,40 +544,114 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
       setRegIdLoading(false)
     }
     fetchRegId()
+
+    // Cleanup polling on unmount
+    return () => { pollingRef.current?.stop() }
   }, [])
+
+  // ── Draft helpers — call these after every setState
+  const sd = (patch: Record<string, any>) => saveDraft(patch)
+
+  // ── Photo: start verification flow
+  const startVerify = () => {
+    if (!regId || photoPhase === 'countdown' || photoPhase === 'polling') return
+    setPhotoError('')
+    setPhotoVerified(false)
+    setPhotoUrl('')
+    setPhotoPreviewUrl('')
+    setPhotoPhase('countdown')
+    setPhotoCountdown(30)
+
+    let stopped = false
+    // const stop = () => { stopped = true }
+    const stop = () => stopped
+    pollingRef.current = { stop: () => { stopped = true } }
+
+    // ── Phase 1: 40s countdown
+    let remaining = 30
+    const countdownTimer = setInterval(() => {
+      if (stopped) { clearInterval(countdownTimer); return }
+      remaining -= 1
+      setPhotoCountdown(remaining)
+      if (remaining <= 0) {
+        clearInterval(countdownTimer)
+        if (!stopped) beginPolling(stop)
+      }
+    }, 1000)
+  }
+
+  const doSingleCheck = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(
+        `${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`
+      )
+      const json = await res.json()
+      if (json.status === 'found' && json.url) {
+        setPhotoUrl(json.url)                            // original → DB
+        setPhotoPreviewUrl(getDrivePreviewUrl(json.url)) // lh3 → display
+        setPhotoVerified(true)
+        setPhotoPhase('done')
+        setPhotoError('')
+        return true
+      }
+    } catch {}
+    return false
+  }
+
+  const beginPolling = (stop: () => boolean) => {
+    setPhotoPhase('polling')
+    const startedAt = Date.now()
+    const MAX_MS = 4 * 60 * 1000  // 4 minutes
+
+    const runCycle = async () => {
+      if ((stop as any).stopped) return
+      if (Date.now() - startedAt > MAX_MS) {
+        setPhotoPhase('failed')
+        setPhotoError('Photo not found after 4 minutes. Please re-upload and try again.')
+        return
+      }
+
+      // immediate check at start of each cycle
+      const found = await doSingleCheck()
+      if (found) return
+
+      // 5s countdown before next attempt
+      let c = 5
+      setPollCountdown(c)
+      const tick = setInterval(() => {
+        if ((stop as any).stopped) { clearInterval(tick); return }
+        c -= 1
+        setPollCountdown(c)
+        if (c <= 0) {
+          clearInterval(tick)
+          runCycle()
+        }
+      }, 1000)
+    }
+
+    // patch stop so inner closures can read it
+    ;(stop as any).stopped = false
+    const originalStop = pollingRef.current!.stop
+    pollingRef.current!.stop = () => { (stop as any).stopped = true; originalStop() }
+
+    runCycle()
+  }
 
   const openPhotoForm = () => {
     if (!regId) return
-    window.open(`${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`, '_blank')
+    pollingRef.current?.stop()
+    window.open(
+      `${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`,
+      '_blank'
+    )
+    startVerify()
   }
 
-  const verifyPhoto = async () => {
-    if (!regId) return
-    setPhotoChecking(true)
-    setPhotoError('')
-    try {
-      const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
-      const json = await res.json()
-      if (json.status === 'found' && json.url) {
-        setPhotoUrl(json.url)
-        setPhotoVerified(true)
-        setPhotoError('')
-      } else {
-        setPhotoError('Photo not found yet. Please upload via the form and try again.')
-      }
-    } catch {
-      setPhotoError('Could not reach verification server. Check your connection.')
-    } finally {
-      setPhotoChecking(false)
-    }
-  }
-
-  // ── CHANGE: hard block if mobile already exists in admission_responses
+  // ── Field handlers with draft saving
   const handleMobileChange = async (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 10)
-    setMobile(digits)
+    setMobile(digits); sd({ mobile: digits })
     setMobileError('')
-
     if (digits.length === 10) {
       const { data, error: qErr } = await supabase
         .schema('library_management')
@@ -540,34 +660,24 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
         .eq('mobile_number', digits)
         .limit(1)
         .maybeSingle()
-
-      if (!qErr && data) {
-        setMobileError('This mobile number already has an admission record. Use Renew instead.')
-      }
+      if (!qErr && data) setMobileError('This mobile number already has an admission record. Use Renew instead.')
     }
   }
 
   const handleStartDateChange = (val: string) => {
-    setStartDate(val)
-    if (isDateOlderThan20Days(val)) {
-      setError('Start date cannot be older than 20 days')
-    } else if (error.includes('Start date')) {
-      setError('')
-    }
+    setStartDate(val); sd({ startDate: val })
+    if (isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days')
+    else if (error.includes('Start date')) setError('')
   }
 
-  // ── CHANGE: when months changes, auto-update fees to months*500 (only if fees
-  //   still equals the previous auto-computed value — i.e. user hasn't customised it)
   const handleMonthsChange = (val: string) => {
     const prevMin = Math.round(500 * parseFloat(months || '1'))
-    const newMin = Math.round(500 * parseFloat(val || '1'))
-    setMonths(val)
-
-    // Auto-update fees only when they still match the previous minimum (not customised)
+    const newMin  = Math.round(500 * parseFloat(val || '1'))
+    setMonths(val); sd({ months: val })
     const currentFees = parseFloat(finalFees)
     if (isNaN(currentFees) || currentFees === prevMin) {
-      setFinalFees(newMin.toString())
-      setFeesSubmitted(newMin.toString())
+      setFinalFees(newMin.toString()); setFeesSubmitted(newMin.toString())
+      sd({ finalFees: newMin.toString(), feesSubmitted: newMin.toString() })
       if (error.startsWith('Minimum fees')) setError('')
     } else if (currentFees < newMin) {
       setError(`Minimum fees for ${val} month(s) is ₹${newMin}`)
@@ -577,52 +687,48 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   }
 
   const handleFeesChange = (val: string) => {
-    setFinalFees(val)
-    setFeesSubmitted(val)
+    setFinalFees(val); setFeesSubmitted(val); sd({ finalFees: val, feesSubmitted: val })
     const parsed = parseFloat(val)
     const currentMin = Math.round(500 * parseFloat(months || '1'))
-    if (!isNaN(parsed) && parsed < currentMin) {
-      setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    } else if (error.startsWith('Minimum fees')) {
-      setError('')
-    }
+    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
+    else if (error.startsWith('Minimum fees')) setError('')
   }
 
-  const toggleShift = (shift: string) =>
-    setSelectedShifts(prev => prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift])
+  const toggleShift = (shift: string) => {
+    setSelectedShifts(prev => {
+      const next = prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift]
+      sd({ selectedShifts: next })
+      return next
+    })
+  }
 
   const handleSubmit = async () => {
     setError('')
-
-    // Personal validations
-    if (!name.trim() || name.trim().length < 2) { setError('Name must be at least 2 characters.'); return }
-    if (mobile.length !== 10) { setError('Mobile number must be exactly 10 digits.'); return }
-    if (mobileError) { setError(mobileError); return }   // block if duplicate
-    if (!gender) { setError('Please select a gender.'); return }
-    if (!dob) { setError('Date of birth is required.'); return }  // now required
-    if (new Date(dob) >= new Date()) { setError('Date of birth must be in the past.'); return }
+    if (!name.trim() || name.trim().length < 2)          { setError('Name must be at least 2 characters.'); return }
+    if (mobile.length !== 10)                             { setError('Mobile number must be exactly 10 digits.'); return }
+    if (mobileError)                                      { setError(mobileError); return }
+    if (!gender)                                          { setError('Please select a gender.'); return }
+    if (!dob)                                             { setError('Date of birth is required.'); return }
+    if (new Date(dob) >= new Date())                      { setError('Date of birth must be in the past.'); return }
     if (aadhar && aadhar.replace(/\D/g, '').length !== 12) { setError('Aadhar number must be 12 digits.'); return }
-
-    // Admission validations
-    if (!startDate) { setError('Start date is required.'); return }
-    if (isDateOlderThan20Days(startDate)) { setError('Start date cannot be older than 20 days.'); return }
-    if (!months || parseFloat(months) < 1) { setError('Months must be at least 1.'); return }
+    if (!startDate)                                       { setError('Start date is required.'); return }
+    if (isDateOlderThan20Days(startDate))                 { setError('Start date cannot be older than 20 days.'); return }
+    if (!months || parseFloat(months) < 1)                { setError('Months must be at least 1.'); return }
     const seatNum = parseInt(seat)
-    if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92.'); return }
-    if (selectedShifts.length === 0) { setError('Please select at least one shift.'); return }
-    if (!finalFees || parseFloat(finalFees) < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
-    if (!feesSubmitted) { setError('Fees Submitted is required.'); return }
-    if (!regId) { setError('Register ID not loaded yet. Please wait.'); return }
-
-    // Photo validation (photo section is at bottom but still required)
-    if (!photoVerified || !photoUrl) { setError('Please upload and verify the student photo before submitting.'); return }
+    if (isNaN(seatNum) || seatNum < 0 || seatNum > 92)   { setError('Seat must be between 0 and 92.'); return }
+    if (selectedShifts.length === 0)                      { setError('Please select at least one shift.'); return }
+    if (!finalFees || parseFloat(finalFees) < minFees)    { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
+    if (!feesSubmitted)                                   { setError('Fees Submitted is required.'); return }
+    if (!regId)                                           { setError('Register ID not loaded yet. Please wait.'); return }
+    if (!photoVerified || !photoUrl)                      { setError('Please verify the student photo before submitting.'); return }
 
     setSaving(true)
     const payload = {
       timestamp: now, name: name.trim(), mobile_number: mobile,
       admission: 'New', address: address.trim() || null, gender,
       date_of_birth: dob || null, aadhar_number: aadhar.replace(/\D/g, '') || null,
-      photo: photoUrl, start_date: startDate, months: parseFloat(months),
+      photo: photoUrl,   // ← original Drive URL, unchanged
+      start_date: startDate, months: parseFloat(months),
       seat: seat.toString(), shift: selectedShifts.join(', '),
       final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
       mode, register_id: regId, comment: comment.trim() || null, created_by: userName,
@@ -635,17 +741,135 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
-    // ── FIX: pingAppsScript was missing here
     pingAppsScript()
+    clearDraft()        // ← clear session cache on success
+    pollingRef.current?.stop()
     onSuccess()
     onClose()
   }
 
+  // ─── Styles (same tokens as your existing code)
   const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const errorInputStyle: React.CSSProperties = { ...inputStyle, border: '1px solid #fca5a5' }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
+
+  // ─── Photo section UI
+  const PhotoSection = () => {
+    if (photoVerified) {
+      return (
+        <div className="rounded-2xl p-4 mb-4" style={{ background: '#f0fdf4', border: '1px solid #86efac' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0" style={{ border: '2px solid #86efac' }}>
+              {photoPreviewUrl
+                ? <img src={photoPreviewUrl} alt="Student" className="w-full h-full object-cover"
+                    onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                : <div className="w-full h-full flex items-center justify-center text-2xl" style={{ background: '#dcfce7' }}>📷</div>
+              }
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-semibold" style={{ color: '#166534' }}>✓ Photo verified</p>
+              <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>Linked to Register ID {regId}</p>
+            </div>
+            <button
+              onClick={() => {
+                pollingRef.current?.stop()
+                setPhotoVerified(false); setPhotoUrl(''); setPhotoPreviewUrl('')
+                setPhotoPhase('idle'); setPhotoError('')
+              }}
+              className="text-xs px-2.5 py-1 rounded-lg"
+              style={{ color: '#dc2626', border: '1px solid #fca5a5', background: '#fff' }}>
+              Re-upload
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    if (photoPhase === 'countdown') {
+      return (
+        <div className="rounded-2xl p-4 mb-4" style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: T.accent }}>
+              <span className="text-white text-sm font-bold">{photoCountdown}</span>
+            </div>
+            <div>
+              <p className="text-xs font-semibold" style={{ color: T.text }}>Waiting for upload…</p>
+              <p className="text-[10px]" style={{ color: T.textMuted }}>
+                Upload the photo in the form, checking in {photoCountdown}s
+              </p>
+            </div>
+          </div>
+          <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: T.accentBorder }}>
+            <div className="h-full rounded-full transition-all duration-1000"
+              style={{ width: `${((30 - photoCountdown) / 30) * 100}%`, background: T.accent }} />
+          </div>
+        </div>
+      )
+    }
+
+    if (photoPhase === 'polling') {
+      return (
+        <div className="rounded-2xl p-4 mb-4" style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: T.surface, border: `2px solid ${T.accent}` }}>
+              <span className="text-sm font-bold" style={{ color: T.accent }}>{pollCountdown}</span>
+            </div>
+            <div>
+              <p className="text-xs font-semibold" style={{ color: T.text }}>Checking for photo…</p>
+              <p className="text-[10px]" style={{ color: T.textMuted }}>Next check in {pollCountdown}s</p>
+            </div>
+            <div className="ml-auto">
+              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" style={{ color: T.accent }}>
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // idle or failed
+    return (
+      <div className="rounded-2xl p-4 mb-4" style={{
+        background: photoPhase === 'failed' ? '#fef2f2' : T.accentLight,
+        border: `1px solid ${photoPhase === 'failed' ? '#fecaca' : T.accentBorder}`,
+      }}>
+        <p className="text-xs mb-3" style={{ color: T.textSub }}>
+          {photoPhase === 'failed'
+            ? 'Photo not found. Please re-upload via the form and verify again.'
+            : 'Open the upload form in a new tab, upload the photo, then click Verify Photo.'}
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={openPhotoForm} disabled={regIdLoading || !regId}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
+            style={{ background: T.accent, color: 'white' }}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            Open Upload Form ↗
+          </button>
+          <button
+            onClick={doSingleCheck}
+            disabled={regIdLoading || !regId}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Verify Photo
+          </button>
+        </div>
+        {photoError && (
+          <p className="text-xs mt-2.5 font-medium" style={{ color: '#dc2626' }}>{photoError}</p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
@@ -673,6 +897,18 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
           </div>
 
+          {/* Draft restored notice */}
+          {Object.keys(draft).length > 0 && (
+            <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
+              style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+              <p className="text-[10px]" style={{ color: T.accent }}>📝 Draft restored from your last session</p>
+              <button onClick={() => { clearDraft(); onClose() }}
+                className="text-[10px] underline ml-2" style={{ color: T.textMuted }}>
+                Discard
+              </button>
+            </div>
+          )}
+
           {/* Timestamp */}
           <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
             🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -693,11 +929,11 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+            <input type="text" value={name}
+              onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
               placeholder="Enter full name" className={inputCls} style={inputStyle} />
           </div>
 
-          {/* Mobile — hard block if exists in admission_responses */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
             <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
@@ -714,7 +950,8 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
-              <select value={gender} onChange={(e) => setGender(e.target.value)}
+              <select value={gender}
+                onChange={(e) => { setGender(e.target.value); sd({ gender: e.target.value }) }}
                 className={inputCls + ' appearance-none'} style={inputStyle}>
                 <option value="">Select…</option>
                 <option value="Male">Male</option>
@@ -723,9 +960,9 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
               </select>
             </div>
             <div>
-              {/* ── CHANGE: DOB now required (*) */}
               <label className={labelCls} style={{ color: T.textSub }}>Date of Birth *</label>
-              <input type="date" value={dob} onChange={(e) => setDob(e.target.value)}
+              <input type="date" value={dob}
+                onChange={(e) => { setDob(e.target.value); sd({ dob: e.target.value }) }}
                 max={toInputDate(new Date().toISOString())} className={inputCls} style={inputStyle} />
             </div>
           </div>
@@ -735,14 +972,15 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
               Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
             </label>
             <input type="text" value={aadhar}
-              onChange={(e) => setAadhar(e.target.value.replace(/\D/g, '').slice(0, 12))}
+              onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 12); setAadhar(v); sd({ aadhar: v }) }}
               placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
           </div>
 
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Address</label>
-            <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2}
-              placeholder="Full address (optional)" className={inputCls + ' resize-none'} style={inputStyle} />
+            <textarea value={address}
+              onChange={(e) => { setAddress(e.target.value); sd({ address: e.target.value }) }}
+              rows={2} placeholder="Full address (optional)" className={inputCls + ' resize-none'} style={inputStyle} />
           </div>
 
           {/* ── ADMISSION DETAILS ── */}
@@ -762,19 +1000,17 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              {/* ── CHANGE: updating months auto-updates fees to months*500 */}
               <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
                 min="1" className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              {/* ── CHANGE: default is '0' */}
-              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)}
+              <input type="number" value={seat}
+                onChange={(e) => { setSeat(e.target.value); sd({ seat: e.target.value }) }}
                 min="0" max="92" className={inputCls} style={inputStyle} />
             </div>
           </div>
 
-          {/* ── CHANGE: all 3 shifts selected by default */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
             <div className="space-y-2">
@@ -801,13 +1037,13 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
                 Final Fees *
                 <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
               </label>
-              {/* ── CHANGE: editable, defaults to 500*months */}
               <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
                 className={inputCls} style={inputStyle} />
             </div>
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)}
+              <input type="number" value={feesSubmitted}
+                onChange={(e) => { setFeesSubmitted(e.target.value); sd({ feesSubmitted: e.target.value }) }}
                 className={inputCls} style={inputStyle} />
             </div>
           </div>
@@ -815,7 +1051,8 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value)}
+              <select value={mode}
+                onChange={(e) => { setMode(e.target.value); sd({ mode: e.target.value }) }}
                 className={inputCls + ' appearance-none'} style={inputStyle}>
                 <option value="Cash">Cash</option>
                 <option value="Online">Online</option>
@@ -829,63 +1066,14 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
           <div className="mb-5">
             <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-              placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
+            <textarea value={comment}
+              onChange={(e) => { setComment(e.target.value); sd({ comment: e.target.value }) }}
+              rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
           </div>
 
-          {/* ── PHOTO UPLOAD — moved to bottom ── */}
+          {/* ── PHOTO UPLOAD ── */}
           <SectionLabel>📸 Photo Upload *</SectionLabel>
-          <div className="rounded-2xl p-4 mb-4" style={{
-            background: photoVerified ? '#f0fdf4' : T.accentLight,
-            border: `1px solid ${photoVerified ? '#86efac' : T.accentBorder}`,
-          }}>
-            {!photoVerified ? (
-              <>
-                <p className="text-xs mb-3" style={{ color: T.textSub }}>
-                  Upload the student's photo via Google Form (opens in new tab), then verify below.
-                </p>
-                <div className="flex gap-2 flex-wrap">
-                  <button onClick={openPhotoForm} disabled={regIdLoading || !regId}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-                    style={{ background: T.accent, color: 'white' }}>
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                    Open Upload Form ↗
-                  </button>
-                  <button onClick={verifyPhoto} disabled={photoChecking || regIdLoading || !regId}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-                    style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                    {photoChecking
-                      ? <><svg className="animate-spin w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                        </svg>Checking…</>
-                      : <><svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>✓ Verify Photo</>}
-                  </button>
-                </div>
-                {photoError && <p className="text-xs mt-2.5 font-medium" style={{ color: '#dc2626' }}>{photoError}</p>}
-              </>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0" style={{ border: '1px solid #86efac' }}>
-                  <img src={photoUrl} alt="Student photo" className="w-full h-full object-cover"
-                    onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                </div>
-                <div className="flex-1">
-                  <p className="text-xs font-semibold" style={{ color: '#166534' }}>✓ Photo verified</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>Linked to Register ID {regId}</p>
-                </div>
-                <button onClick={() => { setPhotoVerified(false); setPhotoUrl('') }}
-                  className="text-xs px-2.5 py-1 rounded-lg"
-                  style={{ color: '#dc2626', border: '1px solid #fca5a5', background: '#fff' }}>
-                  Re-upload
-                </button>
-              </div>
-            )}
-          </div>
+          <PhotoSection />
 
           {error && (
             <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
@@ -893,7 +1081,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </div>
           )}
 
-          {!photoVerified && (
+          {!photoVerified && photoPhase === 'idle' && (
             <div className="mb-4 px-4 py-2.5 rounded-xl text-xs"
               style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
               📸 Upload and verify the student's photo above to enable submission.
@@ -903,7 +1091,9 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
           <div className="flex gap-3">
             <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
               style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-            <button onClick={handleSubmit} disabled={!photoVerified || saving || regIdLoading || !!mobileError}
+            <button
+              onClick={handleSubmit}
+              disabled={!photoVerified || saving || regIdLoading || !!mobileError}
               className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
               style={{ background: T.accent, color: 'white' }}>
               {saving
@@ -1066,7 +1256,7 @@ export default function Home() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold"
               style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
-              📚 Knowledge Hub Library
+              📚 Knowledge Hub
             </h1>
             <p className="text-[10px] mt-1 tracking-[0.2em] uppercase font-medium" style={{ color: T.textMuted }}>Library Dashboard</p>
           </div>
