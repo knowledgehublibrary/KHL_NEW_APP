@@ -54,14 +54,10 @@ function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onCon
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4"
       style={{ background: 'rgba(28,25,23,0.6)', backdropFilter: 'blur(4px)' }}>
       <div className="w-full sm:max-w-xs rounded-t-2xl sm:rounded-2xl shadow-2xl"
-        style={{
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        }}>
+        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
         <div className="h-[3px] rounded-t-2xl"
           style={{ background: `linear-gradient(90deg, transparent, ${danger ? '#dc2626' : T.accent}, transparent)` }} />
-        <div className="p-6">
+        <div className="p-6 pb-[max(24px,env(safe-area-inset-bottom,24px))]">
           <p className="text-sm font-medium text-center mb-6" style={{ color: T.text }}>{message}</p>
           <div className="flex gap-3">
             <button onClick={onCancel}
@@ -96,7 +92,6 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-// ─── SECTION LABEL ────────────────────────────────────────────────────────────
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 mb-3 mt-5">
@@ -108,7 +103,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-// ─── NEW ADMISSION BUTTON ─────────────────────────────────────────────────────
 function NewAdmissionButton({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -200,6 +194,32 @@ const StudentCard = memo(({
 })
 StudentCard.displayName = 'StudentCard'
 
+// ─── MODAL SHELL — fixes Android buttons hidden bug ───────────────────────────
+// Wraps all popups. Scrollable content + sticky footer buttons.
+function ModalShell({ onBackdropClick, children }: {
+  onBackdropClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
+      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onBackdropClick() }}>
+      <div
+        className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          // KEY FIX: use dvh so Android Chrome bottom bar is accounted for
+          maxHeight: 'calc(100dvh - 60px)',
+          // On desktop centre it won't need maxHeight override
+        }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // ─── RENEW POPUP ──────────────────────────────────────────────────────────────
 function RenewPopup({ student, userName, onClose, onSuccess }: {
   student: any; userName: string; onClose: () => void; onSuccess: () => void
@@ -243,34 +263,24 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
 
   const handleStartDateChange = (val: string) => {
     setStartDate(val)
-    if (isDateOlderThan20Days(val)) {
-      setError('Start date cannot be older than 20 days')
-    } else if (error.includes('Start date')) {
-      setError('')
-    }
+    if (isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days')
+    else if (error.includes('Start date')) setError('')
   }
 
   const handleFeesChange = (val: string) => {
-    setFinalFees(val)
-    setFeesSubmitted(val)
+    setFinalFees(val); setFeesSubmitted(val)
     const parsed = parseFloat(val)
     const currentMin = Math.round(500 * parseFloat(months || '1'))
-    if (!isNaN(parsed) && parsed < currentMin) {
-      setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    } else if (error.startsWith('Minimum fees')) {
-      setError('')
-    }
+    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
+    else if (error.startsWith('Minimum fees')) setError('')
   }
 
   const handleMonthsChange = (val: string) => {
     setMonths(val)
     const currentMin = Math.round(500 * parseFloat(val || '1'))
     const parsed = parseFloat(finalFees)
-    if (!isNaN(parsed) && parsed < currentMin) {
-      setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
-    } else if (error.startsWith('Minimum fees')) {
-      setError('')
-    }
+    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
+    else if (error.startsWith('Minimum fees')) setError('')
   }
 
   const handleSubmit = async () => {
@@ -305,160 +315,149 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl"
-        style={{
-          background: T.surface, border: `1px solid ${T.border}`,
-          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 20px))',
-          overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any,
-          overscrollBehavior: 'contain', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        }}>
-        <div className="h-[3px] rounded-t-2xl" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-        <div className="flex justify-center pt-3 pb-1 sm:hidden">
-          <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
-        </div>
-        <div className="p-5 sm:p-6">
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Renew Membership</h2>
-              <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
-            </div>
-            <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
-          </div>
-          <div className="mb-5 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
-            🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Name</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div>
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Mobile</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div>
-            </div>
-          </div>
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
-              {regIdLoading ? <span className="animate-pulse">Fetching…</span> : regId || '—'}
-            </div>
-          </div>
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-            <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} className={inputCls} style={inputStyle} />
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)} min="1" className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
-            <div className="space-y-2">
-              {SHIFTS.map((shift) => {
-                const checked = selectedShifts.includes(shift)
-                return (
-                  <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
-                    style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
-                    <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                      style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
-                      {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </div>
-                    <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>
-                Final Fees *
-                {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
-              </label>
-              <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)} className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="Cash">Cash</option>
-                <option value="Online">Online</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div>
-            </div>
-          </div>
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-              placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
-          </div>
-          <div className="mb-5">
-            <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
-          </div>
-          {error && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-              <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-            </div>
-          )}
-          <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-            <button onClick={handleSubmit} disabled={saving || regIdLoading}
-              className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-              style={{ background: T.accent, color: 'white' }}>
-              {saving
-                ? <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    Saving…
-                  </span>
-                : '✓ Confirm Renewal'}
-            </button>
-          </div>
-        </div>
+    <ModalShell onBackdropClick={onClose}>
+      {/* Accent bar + drag handle */}
+      <div className="h-[3px] rounded-t-2xl shrink-0" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
+      <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+        <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
       </div>
-    </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Renew Membership</h2>
+            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
+          </div>
+          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
+        </div>
+        <div className="mb-5 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
+          🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Name</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Mobile</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div>
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
+            {regIdLoading ? <span className="animate-pulse">Fetching…</span> : regId || '—'}
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
+          <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} className={inputCls} style={inputStyle} />
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+            <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)} min="1" className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
+            <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
+          <div className="space-y-2">
+            {SHIFTS.map((shift) => {
+              const checked = selectedShifts.includes(shift)
+              return (
+                <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
+                  style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
+                  <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                    style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
+                    {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                  </div>
+                  <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>
+              Final Fees *
+              {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
+            </label>
+            <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+            <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
+            <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
+              <option value="Cash">Cash</option>
+              <option value="Online">Online</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div>
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
+            placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
+        </div>
+        <div className="mb-2">
+          <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
+        </div>
+        {error && (
+          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Sticky footer buttons — never hidden on Android */}
+      <div className="shrink-0 flex gap-3 p-4 pt-3"
+        style={{
+          borderTop: `1px solid ${T.border}`,
+          background: T.surface,
+          paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
+        }}>
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+          style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+        <button onClick={handleSubmit} disabled={saving || regIdLoading}
+          className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+          style={{ background: T.accent, color: 'white' }}>
+          {saving
+            ? <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Saving…
+              </span>
+            : '✓ Confirm Renewal'}
+        </button>
+      </div>
+    </ModalShell>
   )
 }
 
-// ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-// ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-// Drop-in replacement for NewAdmissionPopup in your page.tsx
-// Changes:
-//   1. sessionStorage draft: all fields auto-saved, restored on open, cleared on success
-//   2. Photo: "Verify Photo" starts 40s countdown, then polls every 5s up to 4 mins
-//      Shows preview using lh3.googleusercontent.com/d/{id} conversion
-//      Stores original Drive URL unchanged in DB
-
+// ─── DRAFT HELPERS ────────────────────────────────────────────────────────────
 const DRAFT_KEY = 'new_admission_draft'
 
 function getDrivePreviewUrl(driveUrl: string): string {
-  // Converts https://drive.google.com/open?id=FILE_ID
-  // to       https://lh3.googleusercontent.com/d/FILE_ID
   if (!driveUrl) return ''
   try {
-    // handle both ?id= and /d/ formats
     const idMatch = driveUrl.match(/[?&]id=([^&]+)/) || driveUrl.match(/\/d\/([^/]+)/)
     if (idMatch?.[1]) return `https://lh3.googleusercontent.com/d/${idMatch[1]}`
   } catch {}
@@ -483,6 +482,7 @@ function clearDraft() {
   try { sessionStorage.removeItem(DRAFT_KEY) } catch {}
 }
 
+// ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
 function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   userName: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -493,50 +493,46 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   // Photo state
   const [photoVerified, setPhotoVerified] = useState(false)
-  const [photoUrl, setPhotoUrl] = useState('')           // original Drive URL → stored in DB
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState('') // lh3 URL → only for display
+  const [photoUrl, setPhotoUrl] = useState('')
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState('')
   const [photoPhase, setPhotoPhase] = useState<'idle' | 'countdown' | 'polling' | 'done' | 'failed'>('idle')
-  const [photoCountdown, setPhotoCountdown] = useState(30)  // seconds before first poll
-  const [pollCountdown, setPollCountdown] = useState(5)     // seconds between polls
+  const [photoCountdown, setPhotoCountdown] = useState(40)
+  const [pollCountdown, setPollCountdown] = useState(5)
   const [photoError, setPhotoError] = useState('')
   const pollingRef = useRef<{ stop: () => void } | null>(null)
 
-  // Personal — restored from draft
+  // Personal
   const [name, setName]       = useState(draft.name || '')
   const [mobile, setMobile]   = useState(draft.mobile || '')
   const [mobileError, setMobileError] = useState('')
+  const [existingStudent, setExistingStudent] = useState<any | null>(null)
   const [address, setAddress] = useState(draft.address || '')
   const [gender, setGender]   = useState(draft.gender || '')
   const [dob, setDob]         = useState(draft.dob || '')
   const [aadhar, setAadhar]   = useState(draft.aadhar || '')
 
-  // Admission — restored from draft
+  // Admission
   const now = new Date().toISOString()
-  const [startDate, setStartDate]         = useState(draft.startDate || toInputDate(now))
-  const [months, setMonths]               = useState(draft.months || '1')
-  const [seat, setSeat]                   = useState(draft.seat ?? '0')
+  const [startDate, setStartDate]           = useState(draft.startDate || toInputDate(now))
+  const [months, setMonths]                 = useState(draft.months || '1')
+  const [seat, setSeat]                     = useState(draft.seat ?? '0')
   const [selectedShifts, setSelectedShifts] = useState<string[]>(draft.selectedShifts || [...SHIFTS])
-  const [finalFees, setFinalFees]         = useState(draft.finalFees || '500')
-  const [feesSubmitted, setFeesSubmitted] = useState(draft.feesSubmitted || '500')
-  const [mode, setMode]                   = useState(draft.mode || 'Cash')
-  const [comment, setComment]             = useState(draft.comment || '')
+  const [finalFees, setFinalFees]           = useState(draft.finalFees || '500')
+  const [feesSubmitted, setFeesSubmitted]   = useState(draft.feesSubmitted || '500')
+  const [mode, setMode]                     = useState(draft.mode || 'Cash')
+  const [comment, setComment]               = useState(draft.comment || '')
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const minFees = Math.round(500 * parseFloat(months || '1'))
 
-  // ── Fetch fresh regId on every open (never from draft)
   useEffect(() => {
     const fetchRegId = async () => {
       setRegIdLoading(true)
       const { data: lastRecord } = await supabase
-        .schema('library_management')
-        .from('admission_responses')
-        .select('register_id')
-        .order('id', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+        .schema('library_management').from('admission_responses')
+        .select('register_id').order('id', { ascending: false }).limit(1).maybeSingle()
       if (lastRecord?.register_id) {
         const { data: nextId } = await supabase.rpc('get_next_reg_id', { current_val: lastRecord.register_id })
         setRegId(nextId || '')
@@ -544,15 +540,12 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
       setRegIdLoading(false)
     }
     fetchRegId()
-
-    // Cleanup polling on unmount
     return () => { pollingRef.current?.stop() }
   }, [])
 
-  // ── Draft helpers — call these after every setState
   const sd = (patch: Record<string, any>) => saveDraft(patch)
 
-  // ── Photo: start verification flow
+  // ── Photo polling
   const startVerify = () => {
     if (!regId || photoPhase === 'countdown' || photoPhase === 'polling') return
     setPhotoError('')
@@ -560,35 +553,30 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     setPhotoUrl('')
     setPhotoPreviewUrl('')
     setPhotoPhase('countdown')
-    setPhotoCountdown(30)
+    setPhotoCountdown(40)
 
-    let stopped = false
-    // const stop = () => { stopped = true }
-    const stop = () => stopped
-    pollingRef.current = { stop: () => { stopped = true } }
+    const stopped = { value: false }
+    pollingRef.current = { stop: () => { stopped.value = true } }
 
-    // ── Phase 1: 40s countdown
-    let remaining = 30
+    let remaining = 40
     const countdownTimer = setInterval(() => {
-      if (stopped) { clearInterval(countdownTimer); return }
+      if (stopped.value) { clearInterval(countdownTimer); return }
       remaining -= 1
       setPhotoCountdown(remaining)
       if (remaining <= 0) {
         clearInterval(countdownTimer)
-        if (!stopped) beginPolling(stop)
+        if (!stopped.value) beginPolling(stopped)
       }
     }, 1000)
   }
 
   const doSingleCheck = async (): Promise<boolean> => {
     try {
-      const res = await fetch(
-        `${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`
-      )
+      const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
       const json = await res.json()
       if (json.status === 'found' && json.url) {
-        setPhotoUrl(json.url)                            // original → DB
-        setPhotoPreviewUrl(getDrivePreviewUrl(json.url)) // lh3 → display
+        setPhotoUrl(json.url)
+        setPhotoPreviewUrl(getDrivePreviewUrl(json.url))
         setPhotoVerified(true)
         setPhotoPhase('done')
         setPhotoError('')
@@ -598,69 +586,56 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     return false
   }
 
-  const beginPolling = (stop: () => boolean) => {
+  const beginPolling = (stopped: { value: boolean }) => {
     setPhotoPhase('polling')
     const startedAt = Date.now()
-    const MAX_MS = 4 * 60 * 1000  // 4 minutes
+    const MAX_MS = 4 * 60 * 1000
 
     const runCycle = async () => {
-      if ((stop as any).stopped) return
+      if (stopped.value) return
       if (Date.now() - startedAt > MAX_MS) {
         setPhotoPhase('failed')
         setPhotoError('Photo not found after 4 minutes. Please re-upload and try again.')
         return
       }
-
-      // immediate check at start of each cycle
       const found = await doSingleCheck()
       if (found) return
 
-      // 5s countdown before next attempt
       let c = 5
       setPollCountdown(c)
       const tick = setInterval(() => {
-        if ((stop as any).stopped) { clearInterval(tick); return }
+        if (stopped.value) { clearInterval(tick); return }
         c -= 1
         setPollCountdown(c)
-        if (c <= 0) {
-          clearInterval(tick)
-          runCycle()
-        }
+        if (c <= 0) { clearInterval(tick); runCycle() }
       }, 1000)
     }
-
-    // patch stop so inner closures can read it
-    ;(stop as any).stopped = false
-    const originalStop = pollingRef.current!.stop
-    pollingRef.current!.stop = () => { (stop as any).stopped = true; originalStop() }
 
     runCycle()
   }
 
   const openPhotoForm = () => {
     if (!regId) return
-    pollingRef.current?.stop()
-    window.open(
-      `${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`,
-      '_blank'
-    )
-    startVerify()
+    window.open(`${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`, '_blank')
   }
 
-  // ── Field handlers with draft saving
+  // ── Mobile change — show student card if exists
   const handleMobileChange = async (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 10)
     setMobile(digits); sd({ mobile: digits })
     setMobileError('')
+    setExistingStudent(null)
+
     if (digits.length === 10) {
       const { data, error: qErr } = await supabase
-        .schema('library_management')
-        .from('admission_responses')
-        .select('mobile_number')
+        .from('v_student_summary')
+        .select('name, mobile_number, status, image_url')
         .eq('mobile_number', digits)
-        .limit(1)
         .maybeSingle()
-      if (!qErr && data) setMobileError('This mobile number already has an admission record. Use Renew instead.')
+      if (!qErr && data) {
+        setMobileError('exists')
+        setExistingStudent(data)
+      }
     }
   }
 
@@ -704,30 +679,30 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const handleSubmit = async () => {
     setError('')
-    if (!name.trim() || name.trim().length < 2)          { setError('Name must be at least 2 characters.'); return }
-    if (mobile.length !== 10)                             { setError('Mobile number must be exactly 10 digits.'); return }
-    if (mobileError)                                      { setError(mobileError); return }
-    if (!gender)                                          { setError('Please select a gender.'); return }
-    if (!dob)                                             { setError('Date of birth is required.'); return }
-    if (new Date(dob) >= new Date())                      { setError('Date of birth must be in the past.'); return }
+    if (!name.trim() || name.trim().length < 2)            { setError('Name must be at least 2 characters.'); return }
+    if (mobile.length !== 10)                               { setError('Mobile number must be exactly 10 digits.'); return }
+    if (mobileError === 'exists')                           { setError('This mobile is already registered. View the student card above.'); return }
+    if (!gender)                                            { setError('Please select a gender.'); return }
+    if (!dob)                                               { setError('Date of birth is required.'); return }
+    if (new Date(dob) >= new Date())                        { setError('Date of birth must be in the past.'); return }
     if (aadhar && aadhar.replace(/\D/g, '').length !== 12) { setError('Aadhar number must be 12 digits.'); return }
-    if (!startDate)                                       { setError('Start date is required.'); return }
-    if (isDateOlderThan20Days(startDate))                 { setError('Start date cannot be older than 20 days.'); return }
-    if (!months || parseFloat(months) < 1)                { setError('Months must be at least 1.'); return }
+    if (!startDate)                                         { setError('Start date is required.'); return }
+    if (isDateOlderThan20Days(startDate))                   { setError('Start date cannot be older than 20 days.'); return }
+    if (!months || parseFloat(months) < 1)                  { setError('Months must be at least 1.'); return }
     const seatNum = parseInt(seat)
-    if (isNaN(seatNum) || seatNum < 0 || seatNum > 92)   { setError('Seat must be between 0 and 92.'); return }
-    if (selectedShifts.length === 0)                      { setError('Please select at least one shift.'); return }
-    if (!finalFees || parseFloat(finalFees) < minFees)    { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
-    if (!feesSubmitted)                                   { setError('Fees Submitted is required.'); return }
-    if (!regId)                                           { setError('Register ID not loaded yet. Please wait.'); return }
-    if (!photoVerified || !photoUrl)                      { setError('Please verify the student photo before submitting.'); return }
+    if (isNaN(seatNum) || seatNum < 0 || seatNum > 92)     { setError('Seat must be between 0 and 92.'); return }
+    if (selectedShifts.length === 0)                        { setError('Please select at least one shift.'); return }
+    if (!finalFees || parseFloat(finalFees) < minFees)      { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
+    if (!feesSubmitted)                                     { setError('Fees Submitted is required.'); return }
+    if (!regId)                                             { setError('Register ID not loaded yet. Please wait.'); return }
+    if (!photoVerified || !photoUrl)                        { setError('Please verify the student photo before submitting.'); return }
 
     setSaving(true)
     const payload = {
       timestamp: now, name: name.trim(), mobile_number: mobile,
       admission: 'New', address: address.trim() || null, gender,
       date_of_birth: dob || null, aadhar_number: aadhar.replace(/\D/g, '') || null,
-      photo: photoUrl,   // ← original Drive URL, unchanged
+      photo: photoUrl,
       start_date: startDate, months: parseFloat(months),
       seat: seat.toString(), shift: selectedShifts.join(', '),
       final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
@@ -735,27 +710,24 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     }
 
     const { error: insertError } = await supabase
-      .schema('library_management')
-      .from('admission_responses')
-      .insert([payload])
+      .schema('library_management').from('admission_responses').insert([payload])
 
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
     pingAppsScript()
-    clearDraft()        // ← clear session cache on success
+    clearDraft()
     pollingRef.current?.stop()
     onSuccess()
     onClose()
   }
 
-  // ─── Styles (same tokens as your existing code)
   const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const errorInputStyle: React.CSSProperties = { ...inputStyle, border: '1px solid #fca5a5' }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
-  // ─── Photo section UI
+  // ── Photo section UI
   const PhotoSection = () => {
     if (photoVerified) {
       return (
@@ -797,14 +769,12 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </div>
             <div>
               <p className="text-xs font-semibold" style={{ color: T.text }}>Waiting for upload…</p>
-              <p className="text-[10px]" style={{ color: T.textMuted }}>
-                Upload the photo in the form, checking in {photoCountdown}s
-              </p>
+              <p className="text-[10px]" style={{ color: T.textMuted }}>Upload the photo in the new tab, checking in {photoCountdown}s</p>
             </div>
           </div>
           <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: T.accentBorder }}>
             <div className="h-full rounded-full transition-all duration-1000"
-              style={{ width: `${((30 - photoCountdown) / 30) * 100}%`, background: T.accent }} />
+              style={{ width: `${((40 - photoCountdown) / 40) * 100}%`, background: T.accent }} />
           </div>
         </div>
       )
@@ -853,9 +823,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </svg>
             Open Upload Form ↗
           </button>
-          <button
-            onClick={doSingleCheck}
-            disabled={regIdLoading || !regId}
+          <button onClick={startVerify} disabled={regIdLoading || !regId}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
             style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -864,252 +832,273 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             Verify Photo
           </button>
         </div>
-        {photoError && (
-          <p className="text-xs mt-2.5 font-medium" style={{ color: '#dc2626' }}>{photoError}</p>
-        )}
+        {photoError && <p className="text-xs mt-2.5 font-medium" style={{ color: '#dc2626' }}>{photoError}</p>}
       </div>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl"
-        style={{
-          background: T.surface, border: `1px solid ${T.border}`,
-          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 20px))',
-          overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any,
-          overscrollBehavior: 'contain', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        }}>
-        <div className="h-[3px] rounded-t-2xl" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-        <div className="flex justify-center pt-3 pb-1 sm:hidden">
-          <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
+    <ModalShell onBackdropClick={onClose}>
+      <div className="h-[3px] rounded-t-2xl shrink-0" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
+      <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+        <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
+      </div>
+
+      {/* Scrollable form body */}
+      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
+            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
+          </div>
+          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
         </div>
 
-        <div className="p-5 sm:p-6">
-          {/* Header */}
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
-              <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
-            </div>
-            <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
-          </div>
-
-          {/* Draft restored notice */}
-          {Object.keys(draft).length > 0 && (
-            <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
-              style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
-              <p className="text-[10px]" style={{ color: T.accent }}>📝 Draft restored from your last session</p>
-              <button onClick={() => { clearDraft(); onClose() }}
-                className="text-[10px] underline ml-2" style={{ color: T.textMuted }}>
-                Discard
-              </button>
-            </div>
-          )}
-
-          {/* Timestamp */}
-          <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
-            🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          </div>
-
-          {/* Register ID */}
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
-              {regIdLoading
-                ? <span className="animate-pulse text-xs">Fetching…</span>
-                : <span className="font-semibold" style={{ color: T.text }}>{regId || '—'}</span>}
-            </div>
-          </div>
-
-          {/* ── PERSONAL DETAILS ── */}
-          <SectionLabel>👤 Personal Details</SectionLabel>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
-            <input type="text" value={name}
-              onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
-              placeholder="Enter full name" className={inputCls} style={inputStyle} />
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
-            <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
-              placeholder="10-digit mobile" maxLength={10} className={inputCls}
-              style={mobileError ? errorInputStyle : inputStyle} />
-            {mobileError && (
-              <div className="mt-1.5 px-3 py-2 rounded-lg text-xs"
-                style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b' }}>
-                🚫 {mobileError}
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
-              <select value={gender}
-                onChange={(e) => { setGender(e.target.value); sd({ gender: e.target.value }) }}
-                className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="">Select…</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Date of Birth *</label>
-              <input type="date" value={dob}
-                onChange={(e) => { setDob(e.target.value); sd({ dob: e.target.value }) }}
-                max={toInputDate(new Date().toISOString())} className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>
-              Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
-            </label>
-            <input type="text" value={aadhar}
-              onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 12); setAadhar(v); sd({ aadhar: v }) }}
-              placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Address</label>
-            <textarea value={address}
-              onChange={(e) => { setAddress(e.target.value); sd({ address: e.target.value }) }}
-              rows={2} placeholder="Full address (optional)" className={inputCls + ' resize-none'} style={inputStyle} />
-          </div>
-
-          {/* ── ADMISSION DETAILS ── */}
-          <SectionLabel>📋 Admission Details</SectionLabel>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>New</div>
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-            <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
-              className={inputCls} style={inputStyle} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
-                min="1" className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              <input type="number" value={seat}
-                onChange={(e) => { setSeat(e.target.value); sd({ seat: e.target.value }) }}
-                min="0" max="92" className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
-            <div className="space-y-2">
-              {SHIFTS.map((shift) => {
-                const checked = selectedShifts.includes(shift)
-                return (
-                  <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
-                    style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
-                    <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                      style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
-                      {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </div>
-                    <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>
-                Final Fees *
-                <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
-              </label>
-              <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
-                className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted}
-                onChange={(e) => { setFeesSubmitted(e.target.value); sd({ feesSubmitted: e.target.value }) }}
-                className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-              <select value={mode}
-                onChange={(e) => { setMode(e.target.value); sd({ mode: e.target.value }) }}
-                className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="Cash">Cash</option>
-                <option value="Online">Online</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
-            </div>
-          </div>
-
-          <div className="mb-5">
-            <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-            <textarea value={comment}
-              onChange={(e) => { setComment(e.target.value); sd({ comment: e.target.value }) }}
-              rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
-          </div>
-
-          {/* ── PHOTO UPLOAD ── */}
-          <SectionLabel>📸 Photo Upload *</SectionLabel>
-          <PhotoSection />
-
-          {error && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-              <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-            </div>
-          )}
-
-          {!photoVerified && photoPhase === 'idle' && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl text-xs"
-              style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
-              📸 Upload and verify the student's photo above to enable submission.
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-            <button
-              onClick={handleSubmit}
-              disabled={!photoVerified || saving || regIdLoading || !!mobileError}
-              className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-              style={{ background: T.accent, color: 'white' }}>
-              {saving
-                ? <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
-                    Saving…
-                  </span>
-                : '✓ Confirm Admission'}
+        {Object.keys(draft).length > 0 && (
+          <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
+            style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+            <p className="text-[10px]" style={{ color: T.accent }}>📝 Draft restored from your last session</p>
+            <button onClick={() => { clearDraft(); onClose() }}
+              className="text-[10px] underline ml-2" style={{ color: T.textMuted }}>
+              Discard
             </button>
           </div>
+        )}
+
+        <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
+          🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
+            {regIdLoading
+              ? <span className="animate-pulse text-xs">Fetching…</span>
+              : <span className="font-semibold" style={{ color: T.text }}>{regId || '—'}</span>}
+          </div>
+        </div>
+
+        <SectionLabel>👤 Personal Details</SectionLabel>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
+          <input type="text" value={name}
+            onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
+            placeholder="Enter full name" className={inputCls} style={inputStyle} />
+        </div>
+
+        {/* Mobile — with student card if already registered */}
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
+          <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
+            placeholder="10-digit mobile" maxLength={10} className={inputCls}
+            style={existingStudent ? errorInputStyle : inputStyle} />
+          {existingStudent && (
+            <div className="mt-2">
+              <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: T.textMuted }}>
+                Number already registered for:
+              </p>
+              <Link
+                href={`/student/${existingStudent.mobile_number}`}
+                onClick={onClose}
+                className="flex items-center gap-3 p-3 rounded-xl"
+                style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}>
+                <div className="relative shrink-0">
+                  <img
+                    src={getProxyUrl(existingStudent.image_url) || '/default-avatar.png'}
+                    onError={(e) => { e.currentTarget.src = '/default-avatar.png' }}
+                    className="w-10 h-10 rounded-lg object-cover"
+                    style={{ border: `1px solid ${T.border}` }} />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
+                    style={{
+                      borderColor: T.surface,
+                      background: existingStudent.status?.includes('Active') ? '#16a34a'
+                        : existingStudent.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
+                        : existingStudent.status?.toLowerCase().includes('blocked') ? '#9ca3af'
+                        : '#dc2626',
+                    }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+                    {existingStudent.name}
+                  </p>
+                  <p className="text-[10px] mt-0.5" style={{ color: T.textMuted }}>{existingStudent.mobile_number}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <StatusBadge status={existingStudent.status} />
+                  <span className="text-[10px]" style={{ color: T.textMuted }}>Tap to view →</span>
+                </div>
+              </Link>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
+            <select value={gender}
+              onChange={(e) => { setGender(e.target.value); sd({ gender: e.target.value }) }}
+              className={inputCls + ' appearance-none'} style={inputStyle}>
+              <option value="">Select…</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Date of Birth *</label>
+            <input type="date" value={dob}
+              onChange={(e) => { setDob(e.target.value); sd({ dob: e.target.value }) }}
+              max={toInputDate(new Date().toISOString())} className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>
+            Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
+          </label>
+          <input type="text" value={aadhar}
+            onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 12); setAadhar(v); sd({ aadhar: v }) }}
+            placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
+        </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Address</label>
+          <textarea value={address}
+            onChange={(e) => { setAddress(e.target.value); sd({ address: e.target.value }) }}
+            rows={2} placeholder="Full address (optional)" className={inputCls + ' resize-none'} style={inputStyle} />
+        </div>
+
+        <SectionLabel>📋 Admission Details</SectionLabel>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>New</div>
+        </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
+          <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+            className={inputCls} style={inputStyle} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+            <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
+              min="1" className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
+            <input type="number" value={seat}
+              onChange={(e) => { setSeat(e.target.value); sd({ seat: e.target.value }) }}
+              min="0" max="92" className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
+          <div className="space-y-2">
+            {SHIFTS.map((shift) => {
+              const checked = selectedShifts.includes(shift)
+              return (
+                <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
+                  style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
+                  <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                    style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
+                    {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                  </div>
+                  <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>
+              Final Fees *
+              <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
+            </label>
+            <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
+              className={inputCls} style={inputStyle} />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+            <input type="number" value={feesSubmitted}
+              onChange={(e) => { setFeesSubmitted(e.target.value); sd({ feesSubmitted: e.target.value }) }}
+              className={inputCls} style={inputStyle} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
+            <select value={mode}
+              onChange={(e) => { setMode(e.target.value); sd({ mode: e.target.value }) }}
+              className={inputCls + ' appearance-none'} style={inputStyle}>
+              <option value="Cash">Cash</option>
+              <option value="Online">Online</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
+          </div>
+        </div>
+
+        <div className="mb-5">
+          <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
+          <textarea value={comment}
+            onChange={(e) => { setComment(e.target.value); sd({ comment: e.target.value }) }}
+            rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
+        </div>
+
+        <SectionLabel>📸 Photo Upload *</SectionLabel>
+        <PhotoSection />
+
+        {error && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
+          </div>
+        )}
+
+        {!photoVerified && photoPhase === 'idle' && (
+          <div className="mb-2 px-4 py-2.5 rounded-xl text-xs"
+            style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
+            📸 Upload and verify the student's photo above to enable submission.
+          </div>
+        )}
       </div>
-    </div>
+
+      {/* Sticky footer — always visible, never hidden by browser chrome */}
+      <div className="shrink-0 flex gap-3 p-4 pt-3"
+        style={{
+          borderTop: `1px solid ${T.border}`,
+          background: T.surface,
+          paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
+        }}>
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+          style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+        <button
+          onClick={handleSubmit}
+          disabled={!photoVerified || saving || regIdLoading || !!mobileError}
+          className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+          style={{ background: T.accent, color: 'white' }}>
+          {saving
+            ? <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Saving…
+              </span>
+            : '✓ Confirm Admission'}
+        </button>
+      </div>
+    </ModalShell>
   )
 }
 
@@ -1136,15 +1125,36 @@ export default function Home() {
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
   } | null>(null)
 
+  // ── iOS Auth Fix: onAuthStateChange is reliable across tab resume/suspend
   useEffect(() => {
-    const init = async () => {
-      const { data } = await supabase.auth.getSession()
-      if (!data.session) { router.push('/login'); return }
-      const { data: profile } = await supabase.from('profiles').select('name, role').eq('id', data.session.user.id).single()
-      setUserName(profile?.name || ''); setRole(profile?.role || '')
+    let profileFetched = false
+
+    const fetchProfile = async (userId: string) => {
+      if (profileFetched) return
+      profileFetched = true
+      const { data: profile } = await supabase.from('profiles').select('name, role').eq('id', userId).single()
+      setUserName(profile?.name || '')
+      setRole(profile?.role || '')
       fetchStudents()
     }
-    init()
+
+    // Fast path for first load and Android (getSession works fine there)
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) fetchProfile(data.session.user.id)
+    })
+
+    // Reliable path: fires on initial load AND every iOS tab resume
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        fetchProfile(session.user.id)
+      } else if (event === 'SIGNED_OUT') {
+        router.push('/login')
+      } else if (event === 'INITIAL_SESSION' && !session) {
+        router.push('/login')
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
@@ -1251,7 +1261,6 @@ export default function Home() {
 
       <div className="max-w-5xl mx-auto px-4 py-6 md:py-8">
 
-        {/* ── HEADER ── */}
         <div className="flex justify-between items-start mb-6 flex-wrap gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold"
@@ -1299,7 +1308,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── STAT CARDS ── */}
+        {/* STAT CARDS */}
         <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
           {CARDS.map(({ key, label, count, color, lightBg, border }) => {
             const active = selectedCard === key
@@ -1325,7 +1334,7 @@ export default function Home() {
           })}
         </div>
 
-        {/* ── SEARCH + BULK CONTROLS ── */}
+        {/* SEARCH + BULK CONTROLS */}
         <div className="flex gap-3 mb-4 flex-wrap">
           <input
             type="text"
@@ -1359,7 +1368,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* ── BULK ACTION BAR ── */}
+        {/* BULK ACTION BAR */}
         {bulkMode && (
           <div className="mb-3 flex items-center gap-3 flex-wrap px-4 py-3 rounded-xl"
             style={{ background: T.surface, border: `1px solid ${T.border}` }}>
@@ -1394,7 +1403,7 @@ export default function Home() {
           </p>
         )}
 
-        {/* ── STUDENT LIST ── */}
+        {/* STUDENT LIST */}
         {loading && (
           <div className="text-center py-20">
             <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
