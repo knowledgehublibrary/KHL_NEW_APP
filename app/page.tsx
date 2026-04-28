@@ -1265,7 +1265,7 @@ export default function Home() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold"
               style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
-              📚 Knowledge Hub
+              📚 Knowledge Hub Library
             </h1>
             <p className="text-[10px] mt-1 tracking-[0.2em] uppercase font-medium" style={{ color: T.textMuted }}>Library Dashboard</p>
           </div>
