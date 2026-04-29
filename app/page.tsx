@@ -35,7 +35,7 @@ function toInputDate(dateStr: string) {
 
 function isDateOlderThan20Days(dateStr: string) {
   if (!dateStr) return false
-  return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 20
+  return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 50
 }
 
 async function pingAppsScript() {
