@@ -12,7 +12,32 @@ const RENEW_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSc5KbtfqUpgRuo
 const PHOTO_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSfq6Ajw4dxXw1PiwLR_Bu6GhNccUXSRTSo6yQgj_2o6SpZDkw/viewform'
 const PHOTO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX-eQ5-UcKiDY1Aa15KnXG52gEK33tkIVAXaWM8lN5CFxdnMyZXqVng0rfnfWYh-vG/exec'
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`
+
+const callGemini = async (body: object): Promise<string> => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await response.json()
+
+    if (response.status === 503 || response.status === 429) {
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, attempt * 2000))
+        continue
+      }
+      throw new Error('Gemini is busy right now. Please try again in a moment.')
+    }
+
+    if (!response.ok) throw new Error(json?.error?.message || `HTTP ${response.status}`)
+    return json?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response received.'
+  }
+  throw new Error('Gemini is busy right now. Please try again in a moment.')
+}
+
 const T = {
   bg: '#faf8f5', surface: '#ffffff',
   border: '#ede8e1', borderHover: '#ddd4c8',
@@ -245,14 +270,17 @@ function ChatWidget({ open, setOpen }: { open: boolean; setOpen: (v: boolean | (
   }, [open, messages])
 
   const fetchAdmissionData = async (): Promise<any[]> => {
-    if (cachedAdmissions) return cachedAdmissions
+    if (cachedAdmissions && cachedAdmissions.length > 0) return cachedAdmissions
     setDataLoading(true)
     const { data, error } = await supabase
-      // .schema('library_management')
-      .from('v_admission_details')
+      .from('v_student_summary')
       .select('*')
     setDataLoading(false)
-    if (error || !data) return []
+    console.log('Admission data fetch:', { count: data?.length, error })
+    if (error || !data) {
+      console.error('Failed to fetch admission data:', error)
+      return []
+    }
     cachedAdmissions = data
     return data
   }
@@ -269,62 +297,27 @@ function ChatWidget({ open, setOpen }: { open: boolean; setOpen: (v: boolean | (
     try {
       const data = await fetchAdmissionData()
 
-      const systemPrompt = `You are an AI assistant for Knowledge Hub Library. You have access to the library's admission records.
+      const systemPrompt = `You are an AI assistant for Knowledge Hub Library. You have access to the library's student records.
 
-The data below is from the v_admission_details view. Each row is one admission record with these columns:
-- register_id: unique ID for the admission
-- name: student's full name
-- mobile_number: 10-digit mobile
-- start_date: admission start date
-- months: duration in months
-- expiry: calculated expiry date (start_date + months + 1 day)
-- expired: 1 if expired, 0 if not
-- status: one of Active, Expired, Blocked, Freezed, Active+Due, Expired+Due, Blocked+Due
-- final_fees: total fees agreed
-- fees_submitted: fees paid
-- due_fees: amount still pending (final_fees - fees_submitted - due_fees_submitted)
-- due_fees_submitted: extra due payment submitted
-- due_fees_submitted_date: date of due payment
-- due_fees_mode: mode of due payment
-- mode: payment mode (Cash or Online)
-- seat: seat number (0-92)
-- shift: e.g. "6 AM - 12 PM", "12 PM - 6 PM", "6 PM - 11 PM"
-- admission: "New" or "Renew"
-- blocked: 1 if blocked
-- is_freezed: 1 if currently frozen
-- freeze_date / unfreeze_date: freeze period dates
-- photo: photo URL
-- date_of_birth: DOB
-- aadhar_number: 12-digit aadhar
-- timestamp: when the admission was recorded
-- next_register_id_renew: the next renewal register_id for this student
+The data below is from v_student_summary. Each row is one student with these columns:
+- name, mobile_number, status, total_due, total_admissions, image_url, latest_expiry, latest_fees, latest_months, latest_seat, latest_shift
 
-ADMISSION DATA (${data.length} records):
-${JSON.stringify(data, null, 0)}
+IMPORTANT RULES:
+- For COUNT queries: count EVERY matching record in the data, do not estimate
+- For LIST queries: show name, mobile, status only — keep it brief
+- Status values: Active, Expired, Blocked, Freezed, Active+Due, Expired+Due, Blocked+Due
+- "Active students" means status includes "Active" (so both "Active" AND "Active+Due" count)
+- For fee queries format with ₹ symbol
+- Format dates as "15 Jan 2025"
+- Keep responses concise — for lists over 10 students, show first 10 and say "and X more"
 
-Answer the user's question by analyzing this data. Be concise and helpful.
-- For lists of students, show name, mobile, status, and relevant fields
-- For counts/aggregations, give the number and a brief breakdown
-- For fee queries, format amounts with ₹ symbol
-- Format dates as readable (e.g. "15 Jan 2025")
-- If no records match, say so clearly
-- Keep responses clear, structured but conversational`
+STUDENT DATA (${data.length} records):
+${JSON.stringify(data, null, 0)}`
 
-      const response = await fetch(GEMINI_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: `${systemPrompt}\n\nUser question: ${question}` }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 1500 }
-        })
+      const aiText = await callGemini({
+        contents: [{ parts: [{ text: `${systemPrompt}\n\nUser question: ${question}` }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 3000 }
       })
-
-      const json = await response.json()
-      if (!response.ok) {
-        console.error('Gemini API error:', json)
-        throw new Error(json?.error?.message || `HTTP ${response.status}`)
-      }
-      const aiText = json?.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not get a response. Please try again.'
 
       setMessages(prev => prev.map((m, i) =>
         i === prev.length - 1 ? { role: 'ai', text: aiText, loading: false } : m
@@ -332,7 +325,7 @@ Answer the user's question by analyzing this data. Be concise and helpful.
     } catch (err: any) {
       console.error('AI chat error:', err)
       setMessages(prev => prev.map((m, i) =>
-        i === prev.length - 1 ? { role: 'ai', text: `⚠️ Error: ${err?.message || 'Something went wrong. Please try again.'}`, loading: false } : m
+        i === prev.length - 1 ? { role: 'ai', text: `⚠️ ${err?.message || 'Something went wrong. Please try again.'}`, loading: false } : m
       ))
     }
     setLoading(false)
@@ -347,13 +340,38 @@ Answer the user's question by analyzing this data. Be concise and helpful.
 
   const formatAiText = (text: string) => {
     return text.split('\n').map((line, i) => {
+      if (line.startsWith('### ')) {
+        return <p key={i} className="font-bold text-sm mb-1 mt-2" style={{ color: T.text }}>{line.slice(4)}</p>
+      }
+      if (line.startsWith('## ')) {
+        return <p key={i} className="font-bold text-sm mb-1 mt-2" style={{ color: T.text }}>{line.slice(3)}</p>
+      }
       if (line.startsWith('**') && line.endsWith('**')) {
         return <p key={i} className="font-semibold mb-1" style={{ color: T.text }}>{line.slice(2, -2)}</p>
       }
-      if (line.startsWith('- ') || line.startsWith('• ')) {
+      if (line.startsWith('- ') || line.startsWith('• ') || line.startsWith('* ')) {
         return <p key={i} className="pl-3 mb-0.5" style={{ color: T.text }}>• {line.slice(2)}</p>
       }
-      if (line.trim() === '') return <div key={i} className="h-2" />
+      if (line.startsWith('| ')) {
+        const cells = line.split('|').filter(c => c.trim() && !c.trim().match(/^[-:]+$/))
+        if (cells.length === 0) return null
+        return (
+          <div key={i} className="flex gap-2 text-xs py-0.5 border-b" style={{ borderColor: T.border }}>
+            {cells.map((cell, j) => (
+              <span key={j} className="flex-1 truncate" style={{ color: T.text }}>{cell.trim()}</span>
+            ))}
+          </div>
+        )
+      }
+      if (line.trim() === '' || line.trim() === '---') return <div key={i} className="h-2" />
+      if (line.includes('**')) {
+        const parts = line.split(/\*\*(.*?)\*\*/g)
+        return (
+          <p key={i} className="mb-0.5 leading-relaxed" style={{ color: T.text }}>
+            {parts.map((part, j) => j % 2 === 1 ? <strong key={j}>{part}</strong> : part)}
+          </p>
+        )
+      }
       return <p key={i} className="mb-0.5 leading-relaxed" style={{ color: T.text }}>{line}</p>
     })
   }
@@ -404,7 +422,7 @@ Answer the user's question by analyzing this data. Be concise and helpful.
             </div>
             <div className="flex-1">
               <p className="text-sm font-bold text-white">AI Assistant</p>
-              <p className="text-[10px] text-white/70">Powered by Gemini · Admission data</p>
+              <p className="text-[10px] text-white/70">Powered by Gemini · Student data</p>
             </div>
             {dataLoading && (
               <div className="flex items-center gap-1.5">
@@ -454,7 +472,7 @@ Answer the user's question by analyzing this data. Be concise and helpful.
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick suggestions (shown only when no conversation yet) */}
+          {/* Quick suggestions */}
           {messages.length === 1 && (
             <div className="shrink-0 px-3 py-2 flex gap-2 overflow-x-auto"
               style={{ background: T.bg, borderTop: `1px solid ${T.border}` }}>
@@ -1426,14 +1444,12 @@ export default function Home() {
     return () => clearTimeout(t)
   }, [searchInput])
 
-  // Restore saved filter on mount (must be in useEffect to avoid SSR hydration mismatch)
   useEffect(() => {
     const saved = sessionStorage.getItem('dashboard_filter') || 'active'
     setFilter(saved)
     setSelectedCard(saved)
   }, [])
 
-  // Persist filter whenever it changes
   useEffect(() => {
     sessionStorage.setItem('dashboard_filter', filter)
   }, [filter])
@@ -1544,7 +1560,6 @@ export default function Home() {
 
   return (
     <>
-      {/* ── MAIN CONTENT ── */}
       <div className="min-h-screen" style={{ background: T.bg }}>
         <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }} />
 
@@ -1735,9 +1750,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── PORTALS: rendered outside min-h-screen div so `fixed` always anchors to viewport ── */}
-
-      {/* AI Chat Widget — admin only */}
       {role === 'admin' && (
         <ChatWidget open={chatOpen} setOpen={setChatOpen} />
       )}
