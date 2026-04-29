@@ -11,7 +11,8 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyxI48i0cFx3c4-
 const RENEW_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSc5KbtfqUpgRuohNyQdhVb-xahCRVTBizCXPobr0vyErzvX_Q/viewform'
 const PHOTO_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSfq6Ajw4dxXw1PiwLR_Bu6GhNccUXSRTSo6yQgj_2o6SpZDkw/viewform'
 const PHOTO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX-eQ5-UcKiDY1Aa15KnXG52gEK33tkIVAXaWM8lN5CFxdnMyZXqVng0rfnfWYh-vG/exec'
-
+const GEMINI_API_KEY = 'AIzaSyBFsxGD-ODQcvBMCoGAOsQqnvLctU9Wbuk'
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`
 const T = {
   bg: '#faf8f5', surface: '#ffffff',
   border: '#ede8e1', borderHover: '#ddd4c8',
@@ -194,8 +195,7 @@ const StudentCard = memo(({
 })
 StudentCard.displayName = 'StudentCard'
 
-// ─── MODAL SHELL — fixes Android buttons hidden bug ───────────────────────────
-// Wraps all popups. Scrollable content + sticky footer buttons.
+// ─── MODAL SHELL ──────────────────────────────────────────────────────────────
 function ModalShell({ onBackdropClick, children }: {
   onBackdropClick: () => void
   children: React.ReactNode
@@ -210,13 +210,303 @@ function ModalShell({ onBackdropClick, children }: {
         style={{
           background: T.surface,
           border: `1px solid ${T.border}`,
-          // KEY FIX: use dvh so Android Chrome bottom bar is accounted for
           maxHeight: 'calc(100dvh - 60px)',
-          // On desktop centre it won't need maxHeight override
         }}>
         {children}
       </div>
     </div>
+  )
+}
+
+// ─── AI CHAT WIDGET ───────────────────────────────────────────────────────────
+interface ChatMessage {
+  role: 'user' | 'ai'
+  text: string
+  loading?: boolean
+}
+
+let cachedAdmissions: any[] | null = null
+
+function ChatWidget({ open, setOpen }: { open: boolean; setOpen: (v: boolean | ((o: boolean) => boolean)) => void }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { role: 'ai', text: '👋 Hi! Ask me anything about admission data — e.g. "Show all active students" or "Students with fees less than 1500 and 3 months".' }
+  ])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [dataLoading, setDataLoading] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 100)
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [open, messages])
+
+  const fetchAdmissionData = async (): Promise<any[]> => {
+    if (cachedAdmissions) return cachedAdmissions
+    setDataLoading(true)
+    const { data, error } = await supabase
+      // .schema('library_management')
+      .from('v_admission_details')
+      .select('*')
+    setDataLoading(false)
+    if (error || !data) return []
+    cachedAdmissions = data
+    return data
+  }
+
+  const askGemini = async (question: string) => {
+    if (!question.trim()) return
+    setLoading(true)
+
+    const userMsg: ChatMessage = { role: 'user', text: question }
+    const aiPlaceholder: ChatMessage = { role: 'ai', text: '', loading: true }
+    setMessages(prev => [...prev, userMsg, aiPlaceholder])
+    setInput('')
+
+    try {
+      const data = await fetchAdmissionData()
+
+      const systemPrompt = `You are an AI assistant for Knowledge Hub Library. You have access to the library's admission records.
+
+The data below is from the v_admission_details view. Each row is one admission record with these columns:
+- register_id: unique ID for the admission
+- name: student's full name
+- mobile_number: 10-digit mobile
+- start_date: admission start date
+- months: duration in months
+- expiry: calculated expiry date (start_date + months + 1 day)
+- expired: 1 if expired, 0 if not
+- status: one of Active, Expired, Blocked, Freezed, Active+Due, Expired+Due, Blocked+Due
+- final_fees: total fees agreed
+- fees_submitted: fees paid
+- due_fees: amount still pending (final_fees - fees_submitted - due_fees_submitted)
+- due_fees_submitted: extra due payment submitted
+- due_fees_submitted_date: date of due payment
+- due_fees_mode: mode of due payment
+- mode: payment mode (Cash or Online)
+- seat: seat number (0-92)
+- shift: e.g. "6 AM - 12 PM", "12 PM - 6 PM", "6 PM - 11 PM"
+- admission: "New" or "Renew"
+- blocked: 1 if blocked
+- is_freezed: 1 if currently frozen
+- freeze_date / unfreeze_date: freeze period dates
+- photo: photo URL
+- date_of_birth: DOB
+- aadhar_number: 12-digit aadhar
+- timestamp: when the admission was recorded
+- next_register_id_renew: the next renewal register_id for this student
+
+ADMISSION DATA (${data.length} records):
+${JSON.stringify(data, null, 0)}
+
+Answer the user's question by analyzing this data. Be concise and helpful.
+- For lists of students, show name, mobile, status, and relevant fields
+- For counts/aggregations, give the number and a brief breakdown
+- For fee queries, format amounts with ₹ symbol
+- Format dates as readable (e.g. "15 Jan 2025")
+- If no records match, say so clearly
+- Keep responses clear, structured but conversational`
+
+      const response = await fetch(GEMINI_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `${systemPrompt}\n\nUser question: ${question}` }] }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 1500 }
+        })
+      })
+
+      const json = await response.json()
+      if (!response.ok) {
+        console.error('Gemini API error:', json)
+        throw new Error(json?.error?.message || `HTTP ${response.status}`)
+      }
+      const aiText = json?.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not get a response. Please try again.'
+
+      setMessages(prev => prev.map((m, i) =>
+        i === prev.length - 1 ? { role: 'ai', text: aiText, loading: false } : m
+      ))
+    } catch (err: any) {
+      console.error('AI chat error:', err)
+      setMessages(prev => prev.map((m, i) =>
+        i === prev.length - 1 ? { role: 'ai', text: `⚠️ Error: ${err?.message || 'Something went wrong. Please try again.'}`, loading: false } : m
+      ))
+    }
+    setLoading(false)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey && !loading) {
+      e.preventDefault()
+      askGemini(input)
+    }
+  }
+
+  const formatAiText = (text: string) => {
+    return text.split('\n').map((line, i) => {
+      if (line.startsWith('**') && line.endsWith('**')) {
+        return <p key={i} className="font-semibold mb-1" style={{ color: T.text }}>{line.slice(2, -2)}</p>
+      }
+      if (line.startsWith('- ') || line.startsWith('• ')) {
+        return <p key={i} className="pl-3 mb-0.5" style={{ color: T.text }}>• {line.slice(2)}</p>
+      }
+      if (line.trim() === '') return <div key={i} className="h-2" />
+      return <p key={i} className="mb-0.5 leading-relaxed" style={{ color: T.text }}>{line}</p>
+    })
+  }
+
+  return (
+    <>
+      {/* Floating Button */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="fixed bottom-6 right-6 z-[100] w-14 h-14 rounded-2xl shadow-2xl flex items-center justify-center transition-all duration-200"
+        style={{
+          background: open ? T.text : T.accent,
+          boxShadow: `0 4px 24px ${T.accent}60`,
+          transform: open ? 'scale(0.95)' : 'scale(1)',
+        }}
+        title="AI Assistant"
+      >
+        {open ? (
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        ) : (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        )}
+      </button>
+
+      {/* Chat Panel */}
+      {open && (
+        <div
+          className="fixed bottom-24 right-4 sm:right-6 z-[99] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+          style={{
+            width: 'min(400px, calc(100vw - 32px))',
+            height: 'min(560px, calc(100dvh - 120px))',
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+          }}
+        >
+          {/* Header */}
+          <div className="shrink-0 px-4 py-3 flex items-center gap-3"
+            style={{ background: T.accent, borderBottom: `1px solid ${T.accentBorder}` }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+              style={{ background: 'rgba(255,255,255,0.2)' }}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-white">AI Assistant</p>
+              <p className="text-[10px] text-white/70">Powered by Gemini · Admission data</p>
+            </div>
+            {dataLoading && (
+              <div className="flex items-center gap-1.5">
+                <svg className="animate-spin w-3.5 h-3.5 text-white/70" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                <span className="text-[10px] text-white/70">Loading data…</span>
+              </div>
+            )}
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3" style={{ background: T.bg }}>
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {msg.role === 'ai' && (
+                  <div className="w-6 h-6 rounded-lg shrink-0 mr-2 mt-0.5 flex items-center justify-center"
+                    style={{ background: T.accent }}>
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                    </svg>
+                  </div>
+                )}
+                <div
+                  className="max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs"
+                  style={msg.role === 'user'
+                    ? { background: T.accent, color: 'white', borderBottomRightRadius: 6 }
+                    : { background: T.surface, color: T.text, border: `1px solid ${T.border}`, borderBottomLeftRadius: 6 }
+                  }
+                >
+                  {msg.loading ? (
+                    <div className="flex items-center gap-1.5 py-0.5">
+                      {[0, 1, 2].map(j => (
+                        <div key={j} className="w-1.5 h-1.5 rounded-full animate-bounce"
+                          style={{ background: T.accent, animationDelay: `${j * 0.15}s` }} />
+                      ))}
+                    </div>
+                  ) : msg.role === 'ai' ? (
+                    <div className="leading-relaxed">{formatAiText(msg.text)}</div>
+                  ) : (
+                    <p className="leading-relaxed">{msg.text}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Quick suggestions (shown only when no conversation yet) */}
+          {messages.length === 1 && (
+            <div className="shrink-0 px-3 py-2 flex gap-2 overflow-x-auto"
+              style={{ background: T.bg, borderTop: `1px solid ${T.border}` }}>
+              {[
+                'Active students count',
+                'Students with due fees',
+                'Show expired students',
+                'Online payment students',
+              ].map(q => (
+                <button key={q} onClick={() => askGemini(q)}
+                  className="shrink-0 px-3 py-1.5 rounded-full text-[10px] font-medium whitespace-nowrap"
+                  style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Input */}
+          <div className="shrink-0 flex gap-2 p-3"
+            style={{ borderTop: `1px solid ${T.border}`, background: T.surface }}>
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about students, fees, seats…"
+              disabled={loading}
+              className="flex-1 px-3 py-2 rounded-xl text-xs focus:outline-none disabled:opacity-50"
+              style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '14px' }}
+            />
+            <button
+              onClick={() => askGemini(input)}
+              disabled={loading || !input.trim()}
+              className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all"
+              style={{ background: T.accent, color: 'white' }}>
+              {loading ? (
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.269 20.876L5.999 12zm0 0h7.5" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -316,13 +606,10 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
 
   return (
     <ModalShell onBackdropClick={onClose}>
-      {/* Accent bar + drag handle */}
       <div className="h-[3px] rounded-t-2xl shrink-0" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
       <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
         <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
       </div>
-
-      {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
         <div className="flex items-start justify-between mb-5">
           <div>
@@ -424,14 +711,8 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
           </div>
         )}
       </div>
-
-      {/* Sticky footer buttons — never hidden on Android */}
       <div className="shrink-0 flex gap-3 p-4 pt-3"
-        style={{
-          borderTop: `1px solid ${T.border}`,
-          background: T.surface,
-          paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
-        }}>
+        style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
         <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
           style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
         <button onClick={handleSubmit} disabled={saving || regIdLoading}
@@ -491,7 +772,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const [regId, setRegId] = useState('')
   const [regIdLoading, setRegIdLoading] = useState(true)
 
-  // Photo state
   const [photoVerified, setPhotoVerified] = useState(false)
   const [photoUrl, setPhotoUrl] = useState('')
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState('')
@@ -501,7 +781,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const [photoError, setPhotoError] = useState('')
   const pollingRef = useRef<{ stop: () => void } | null>(null)
 
-  // Personal
   const [name, setName]       = useState(draft.name || '')
   const [mobile, setMobile]   = useState(draft.mobile || '')
   const [mobileError, setMobileError] = useState('')
@@ -511,7 +790,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const [dob, setDob]         = useState(draft.dob || '')
   const [aadhar, setAadhar]   = useState(draft.aadhar || '')
 
-  // Admission
   const now = new Date().toISOString()
   const [startDate, setStartDate]           = useState(draft.startDate || toInputDate(now))
   const [months, setMonths]                 = useState(draft.months || '1')
@@ -545,7 +823,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const sd = (patch: Record<string, any>) => saveDraft(patch)
 
-  // ── Photo polling
   const startVerify = () => {
     if (!regId || photoPhase === 'countdown' || photoPhase === 'polling') return
     setPhotoError('')
@@ -619,7 +896,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     window.open(`${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`, '_blank')
   }
 
-  // ── Mobile change — show student card if exists
   const handleMobileChange = async (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 10)
     setMobile(digits); sd({ mobile: digits })
@@ -727,7 +1003,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
-  // ── Photo section UI
   const PhotoSection = () => {
     if (photoVerified) {
       return (
@@ -803,7 +1078,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
       )
     }
 
-    // idle or failed
     return (
       <div className="rounded-2xl p-4 mb-4" style={{
         background: photoPhase === 'failed' ? '#fef2f2' : T.accentLight,
@@ -843,8 +1117,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
       <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
         <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
       </div>
-
-      {/* Scrollable form body */}
       <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
         <div className="flex items-start justify-between mb-5">
           <div>
@@ -887,7 +1159,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             placeholder="Enter full name" className={inputCls} style={inputStyle} />
         </div>
 
-        {/* Mobile — with student card if already registered */}
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
           <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
@@ -1073,13 +1344,8 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
         )}
       </div>
 
-      {/* Sticky footer — always visible, never hidden by browser chrome */}
       <div className="shrink-0 flex gap-3 p-4 pt-3"
-        style={{
-          borderTop: `1px solid ${T.border}`,
-          background: T.surface,
-          paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
-        }}>
+        style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
         <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
           style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
         <button
@@ -1120,12 +1386,12 @@ export default function Home() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [renewStudent, setRenewStudent] = useState<any | null>(null)
   const [showNewAdmission, setShowNewAdmission] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
 
   const [confirmModal, setConfirmModal] = useState<{
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
   } | null>(null)
 
-  // ── iOS Auth Fix: onAuthStateChange is reliable across tab resume/suspend
   useEffect(() => {
     let profileFetched = false
 
@@ -1138,12 +1404,10 @@ export default function Home() {
       fetchStudents()
     }
 
-    // Fast path for first load and Android (getSession works fine there)
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) fetchProfile(data.session.user.id)
     })
 
-    // Reliable path: fires on initial load AND every iOS tab resume
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         fetchProfile(session.user.id)
@@ -1161,6 +1425,29 @@ export default function Home() {
     const t = setTimeout(() => startTransition(() => setSearch(searchInput)), 300)
     return () => clearTimeout(t)
   }, [searchInput])
+
+  // Restore saved filter on mount (must be in useEffect to avoid SSR hydration mismatch)
+  useEffect(() => {
+    const saved = sessionStorage.getItem('dashboard_filter') || 'active'
+    setFilter(saved)
+    setSelectedCard(saved)
+  }, [])
+
+  // Persist filter whenever it changes
+  useEffect(() => {
+    sessionStorage.setItem('dashboard_filter', filter)
+  }, [filter])
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        cachedStudents = null
+        fetchStudents(true)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [])
 
   useEffect(() => { setBulkMode(false); setSelectedMobiles(new Set()) }, [filter])
 
@@ -1256,186 +1543,204 @@ export default function Home() {
   ]
 
   return (
-    <div className="min-h-screen" style={{ background: T.bg }}>
-      <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }} />
+    <>
+      {/* ── MAIN CONTENT ── */}
+      <div className="min-h-screen" style={{ background: T.bg }}>
+        <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }} />
 
-      <div className="max-w-5xl mx-auto px-4 py-6 md:py-8">
+        <div className="max-w-5xl mx-auto px-4 py-6 md:py-8">
 
-        <div className="flex justify-between items-start mb-6 flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold"
-              style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
-              📚 Knowledge Hub Library
-            </h1>
-            <p className="text-[10px] mt-1 tracking-[0.2em] uppercase font-medium" style={{ color: T.textMuted }}>Library Dashboard</p>
-          </div>
+          <div className="flex justify-between items-start mb-6 flex-wrap gap-3">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold"
+                style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
+                📚 Knowledge Hub Library
+              </h1>
+              <p className="text-[10px] mt-1 tracking-[0.2em] uppercase font-medium" style={{ color: T.textMuted }}>Library Dashboard</p>
+            </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
-              style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-              🗺️ Seat Map
-            </Link>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
+                style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+                🗺️ Seat Map
+              </Link>
 
-            {isPrivileged && (
-              <>
-                {canSeeLedger && (
-                  <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
+              {isPrivileged && (
+                <>
+                  {canSeeLedger && (
+                    <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
+                      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+                      📋 Ledger
+                    </Link>
+                  )}
+                  {role === 'admin' && (
+                    <Link href="/admin_ledger" className="px-3 py-2 rounded-xl text-xs font-medium"
+                      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+                      🏦 Admin Ledger
+                    </Link>
+                  )}
+                  <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
                     style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                    📋 Ledger
+                    💸 Expenses
                   </Link>
-                )}
-                {role === 'admin' && (
-                  <Link href="/admin_ledger" className="px-3 py-2 rounded-xl text-xs font-medium"
-                    style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                    🏦 Admin Ledger
-                  </Link>
-                )}
-                <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
-                  style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                  💸 Expenses
-                </Link>
-                <NewAdmissionButton onClick={() => setShowNewAdmission(true)} />
-              </>
-            )}
+                  {role === 'admin' && (
+                    <button
+                      onClick={() => setChatOpen(o => !o)}
+                      className="px-3 py-2 rounded-xl text-xs font-medium"
+                      style={{ background: chatOpen ? T.accent : T.surface, border: `1px solid ${chatOpen ? T.accent : T.border}`, color: chatOpen ? 'white' : T.textSub }}>
+                      🤖 AI Chat
+                    </button>
+                  )}
+                  <NewAdmissionButton onClick={() => setShowNewAdmission(true)} />
+                </>
+              )}
 
-            <div className="flex items-center gap-2 ml-1">
-              <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
-              <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-medium border"
-                style={{ color: '#dc2626', borderColor: '#fecaca', background: 'transparent' }}>
-                Logout
-              </button>
+              <div className="flex items-center gap-2 ml-1">
+                <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
+                <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-medium border"
+                  style={{ color: '#dc2626', borderColor: '#fecaca', background: 'transparent' }}>
+                  Logout
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* STAT CARDS */}
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
-          {CARDS.map(({ key, label, count, color, lightBg, border }) => {
-            const active = selectedCard === key
-            return (
-              <button key={key} onClick={() => { setSelectedCard(key); startTransition(() => setFilter(key)) }}
-                className="rounded-2xl p-3 md:p-4 text-left relative overflow-hidden transition-all duration-150"
+          {/* STAT CARDS */}
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
+            {CARDS.map(({ key, label, count, color, lightBg, border }) => {
+              const active = selectedCard === key
+              return (
+                <button key={key} onClick={() => { setSelectedCard(key); startTransition(() => setFilter(key)) }}
+                  className="rounded-2xl p-3 md:p-4 text-left relative overflow-hidden transition-all duration-150"
+                  style={{
+                    background: active ? lightBg : T.surface,
+                    border: `1px solid ${active ? border : T.border}`,
+                    transform: active ? 'scale(1.03)' : 'scale(1)',
+                    boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,0.05)',
+                  }}>
+                  {active && (
+                    <div className="absolute top-0 inset-x-0 h-[3px]"
+                      style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
+                  )}
+                  <p className="text-[10px] font-semibold uppercase tracking-widest"
+                    style={{ color: active ? color : T.textMuted }}>{label}</p>
+                  <p className="text-2xl md:text-3xl font-bold mt-0.5"
+                    style={{ fontFamily: "'Georgia', serif", color: active ? color : T.text }}>{count}</p>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* SEARCH + BULK CONTROLS */}
+          <div className="flex gap-3 mb-4 flex-wrap">
+            <input
+              type="text"
+              placeholder="Search by name or mobile…"
+              className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl focus:outline-none"
+              style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }}
+              onFocus={e => (e.currentTarget.style.borderColor = T.accent)}
+              onBlur={e => (e.currentTarget.style.borderColor = T.border)}
+              onChange={(e) => setSearchInput(e.target.value)} />
+            {showBulkBlock && (
+              <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
+                className="px-4 py-2.5 rounded-xl text-sm font-medium"
                 style={{
-                  background: active ? lightBg : T.surface,
-                  border: `1px solid ${active ? border : T.border}`,
-                  transform: active ? 'scale(1.03)' : 'scale(1)',
-                  boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,0.05)',
+                  background: bulkMode ? '#fee2e2' : '#fff1f2',
+                  border: `1px solid ${bulkMode ? '#fca5a5' : '#fecdd3'}`,
+                  color: '#dc2626',
                 }}>
-                {active && (
-                  <div className="absolute top-0 inset-x-0 h-[3px]"
-                    style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-                )}
-                <p className="text-[10px] font-semibold uppercase tracking-widest"
-                  style={{ color: active ? color : T.textMuted }}>{label}</p>
-                <p className="text-2xl md:text-3xl font-bold mt-0.5"
-                  style={{ fontFamily: "'Georgia', serif", color: active ? color : T.text }}>{count}</p>
+                {bulkMode ? '✕ Cancel' : '🔒 Bulk Block'}
               </button>
-            )
-          })}
-        </div>
+            )}
+            {showBulkUnblock && (
+              <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
+                className="px-4 py-2.5 rounded-xl text-sm font-medium"
+                style={{
+                  background: bulkMode ? '#dcfce7' : '#f0fdf4',
+                  border: `1px solid ${bulkMode ? '#86efac' : '#bbf7d0'}`,
+                  color: '#16a34a',
+                }}>
+                {bulkMode ? '✕ Cancel' : '🔓 Bulk Unblock'}
+              </button>
+            )}
+          </div>
 
-        {/* SEARCH + BULK CONTROLS */}
-        <div className="flex gap-3 mb-4 flex-wrap">
-          <input
-            type="text"
-            placeholder="Search by name or mobile…"
-            className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl focus:outline-none"
-            style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }}
-            onFocus={e => (e.currentTarget.style.borderColor = T.accent)}
-            onBlur={e => (e.currentTarget.style.borderColor = T.border)}
-            onChange={(e) => setSearchInput(e.target.value)} />
-          {showBulkBlock && (
-            <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
-              className="px-4 py-2.5 rounded-xl text-sm font-medium"
-              style={{
-                background: bulkMode ? '#fee2e2' : '#fff1f2',
-                border: `1px solid ${bulkMode ? '#fca5a5' : '#fecdd3'}`,
-                color: '#dc2626',
-              }}>
-              {bulkMode ? '✕ Cancel' : '🔒 Bulk Block'}
-            </button>
-          )}
-          {showBulkUnblock && (
-            <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
-              className="px-4 py-2.5 rounded-xl text-sm font-medium"
-              style={{
-                background: bulkMode ? '#dcfce7' : '#f0fdf4',
-                border: `1px solid ${bulkMode ? '#86efac' : '#bbf7d0'}`,
-                color: '#16a34a',
-              }}>
-              {bulkMode ? '✕ Cancel' : '🔓 Bulk Unblock'}
-            </button>
-          )}
-        </div>
-
-        {/* BULK ACTION BAR */}
-        {bulkMode && (
-          <div className="mb-3 flex items-center gap-3 flex-wrap px-4 py-3 rounded-xl"
-            style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-            <span className="text-sm" style={{ color: T.textSub }}>{selectedMobiles.size} selected</span>
-            <button onClick={selectAll} className="text-xs font-medium hover:underline" style={{ color: T.accent }}>
-              Select All Eligible
-            </button>
-            <button onClick={() => setSelectedMobiles(new Set())} className="text-xs hover:underline" style={{ color: T.textMuted }}>
-              Clear
-            </button>
-            <div className="ml-auto flex gap-2">
-              {showBulkBlock && (
-                <button onClick={handleBulkBlock} disabled={selectedMobiles.size === 0 || bulkLoading}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-                  style={{ background: '#dc2626', color: 'white' }}>
-                  {bulkLoading ? 'Blocking…' : `Block ${selectedMobiles.size}`}
-                </button>
-              )}
-              {showBulkUnblock && (
-                <button onClick={handleBulkUnblock} disabled={selectedMobiles.size === 0 || bulkLoading}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-                  style={{ background: '#16a34a', color: 'white' }}>
-                  {bulkLoading ? 'Unblocking…' : `Unblock ${selectedMobiles.size}`}
-                </button>
-              )}
+          {/* BULK ACTION BAR */}
+          {bulkMode && (
+            <div className="mb-3 flex items-center gap-3 flex-wrap px-4 py-3 rounded-xl"
+              style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+              <span className="text-sm" style={{ color: T.textSub }}>{selectedMobiles.size} selected</span>
+              <button onClick={selectAll} className="text-xs font-medium hover:underline" style={{ color: T.accent }}>
+                Select All Eligible
+              </button>
+              <button onClick={() => setSelectedMobiles(new Set())} className="text-xs hover:underline" style={{ color: T.textMuted }}>
+                Clear
+              </button>
+              <div className="ml-auto flex gap-2">
+                {showBulkBlock && (
+                  <button onClick={handleBulkBlock} disabled={selectedMobiles.size === 0 || bulkLoading}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                    style={{ background: '#dc2626', color: 'white' }}>
+                    {bulkLoading ? 'Blocking…' : `Block ${selectedMobiles.size}`}
+                  </button>
+                )}
+                {showBulkUnblock && (
+                  <button onClick={handleBulkUnblock} disabled={selectedMobiles.size === 0 || bulkLoading}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
+                    style={{ background: '#16a34a', color: 'white' }}>
+                    {bulkLoading ? 'Unblocking…' : `Unblock ${selectedMobiles.size}`}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-        {bulkMode && showBulkBlock && (
-          <p className="text-[10px] mb-3" style={{ color: T.textMuted }}>
-            ⚠️ Only expired students with no pending dues can be bulk blocked.
-          </p>
-        )}
+          )}
+          {bulkMode && showBulkBlock && (
+            <p className="text-[10px] mb-3" style={{ color: T.textMuted }}>
+              ⚠️ Only expired students with no pending dues can be bulk blocked.
+            </p>
+          )}
 
-        {/* STUDENT LIST */}
-        {loading && (
-          <div className="text-center py-20">
-            <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
-              style={{ borderColor: T.accent, borderTopColor: 'transparent' }} />
-            <p className="text-sm" style={{ color: T.textMuted }}>Loading students…</p>
-          </div>
-        )}
-        {!loading && filtered.length === 0 && (
-          <div className="text-center py-20">
-            <p className="text-5xl mb-3">🔍</p>
-            <p className="text-sm" style={{ color: T.textMuted }}>No students found</p>
-          </div>
-        )}
+          {/* STUDENT LIST */}
+          {loading && (
+            <div className="text-center py-20">
+              <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
+                style={{ borderColor: T.accent, borderTopColor: 'transparent' }} />
+              <p className="text-sm" style={{ color: T.textMuted }}>Loading students…</p>
+            </div>
+          )}
+          {!loading && filtered.length === 0 && (
+            <div className="text-center py-20">
+              <p className="text-5xl mb-3">🔍</p>
+              <p className="text-sm" style={{ color: T.textMuted }}>No students found</p>
+            </div>
+          )}
 
-        <div className="grid md:grid-cols-2 gap-3">
-          {filtered.map((s) => {
-            const isEligibleForBulk = filter === 'blocked'
-              ? true
-              : (s.status?.toLowerCase().includes('expired') && !(s.total_due > 0))
-            return (
-              <StudentCard
-                key={s.mobile_number}
-                s={s}
-                selectable={bulkMode && isEligibleForBulk}
-                selected={selectedMobiles.has(s.mobile_number)}
-                onToggle={toggleSelect}
-                onRenew={setRenewStudent}
-                role={role} />
-            )
-          })}
+          <div className="grid md:grid-cols-2 gap-3">
+            {filtered.map((s) => {
+              const isEligibleForBulk = filter === 'blocked'
+                ? true
+                : (s.status?.toLowerCase().includes('expired') && !(s.total_due > 0))
+              return (
+                <StudentCard
+                  key={s.mobile_number}
+                  s={s}
+                  selectable={bulkMode && isEligibleForBulk}
+                  selected={selectedMobiles.has(s.mobile_number)}
+                  onToggle={toggleSelect}
+                  onRenew={setRenewStudent}
+                  role={role} />
+              )
+            })}
+          </div>
         </div>
       </div>
+
+      {/* ── PORTALS: rendered outside min-h-screen div so `fixed` always anchors to viewport ── */}
+
+      {/* AI Chat Widget — admin only */}
+      {role === 'admin' && (
+        <ChatWidget open={chatOpen} setOpen={setChatOpen} />
+      )}
 
       {showNewAdmission && (
         <NewAdmissionPopup
@@ -1460,6 +1765,6 @@ export default function Home() {
           onConfirm={confirmModal.onConfirm}
           onCancel={() => setConfirmModal(null)} />
       )}
-    </div>
+    </>
   )
 }
