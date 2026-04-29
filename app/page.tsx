@@ -273,7 +273,7 @@ function ChatWidget({ open, setOpen }: { open: boolean; setOpen: (v: boolean | (
     if (cachedAdmissions && cachedAdmissions.length > 0) return cachedAdmissions
     setDataLoading(true)
     const { data, error } = await supabase
-      .from('v_student_summary')
+      .from('v_admission_details')
       .select('*')
     setDataLoading(false)
     console.log('Admission data fetch:', { count: data?.length, error })
