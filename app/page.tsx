@@ -38,7 +38,6 @@ function isDateOlderThan20Days(dateStr: string) {
   return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 20
 }
 
-/** Trim + convert any casing to Title Case */
 function toTitleCase(str: string): string {
   return str
     .trim()
@@ -479,8 +478,12 @@ function clearDraft() {
 }
 
 // ─── AADHAAR SCANNER MODAL ────────────────────────────────────────────────────
-// Uses Tesseract.js (browser-only OCR) — NO image ever leaves the device.
-// Privacy-safe: Aadhaar photo is processed entirely in the user's browser.
+// Fixed version:
+//  1. Progressive camera constraint fallback (no more OverconstrainedError)
+//  2. Proper error differentiation: NotAllowedError vs NotFoundError vs HTTPS
+//  3. Tesseract.js v4 + v5 compatible
+//  4. Upload mode: pick front + back images from device
+//  5. "Use Upload Instead" escape hatch on camera error screen
 
 type AadhaarData = {
   name: string
@@ -490,140 +493,258 @@ type AadhaarData = {
   address: string
 }
 
+type InputMode = 'camera' | 'upload'
+type ScanPhase =
+  | 'choose'
+  | 'front'
+  | 'back'
+  | 'upload_front'
+  | 'upload_back'
+  | 'processing'
+  | 'review'
+  | 'error'
+  | 'nocamera'
+  | 'permission'
+
 function AadhaarScannerModal({ onClose, onExtracted }: {
   onClose: () => void
   onExtracted: (data: Partial<AadhaarData>) => void
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const videoRef  = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  type Phase = 'front' | 'back' | 'processing' | 'review' | 'error' | 'nocamera'
-  const [phase, setPhase] = useState<Phase>('front')
-  const [frontImageData, setFrontImageData] = useState<string>('')  // data URL, never sent anywhere
-  const [extracted, setExtracted] = useState<Partial<AadhaarData>>({})
-  const [ocrError, setOcrError] = useState('')
+  const [phase, setPhase]             = useState<ScanPhase>('choose')
+  const [inputMode, setInputMode]     = useState<InputMode>('camera')
+  const [frontImageData, setFrontImageData] = useState<string>('')
+  const [extracted, setExtracted]     = useState<Partial<AadhaarData>>({})
+  const [ocrError, setOcrError]       = useState('')
   const [cameraReady, setCameraReady] = useState(false)
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [facingMode, setFacingMode]   = useState<'environment' | 'user'>('environment')
   const [ocrProgress, setOcrProgress] = useState(0)
+  const [cameraErrorMsg, setCameraErrorMsg] = useState('')
 
-  useEffect(() => {
-    startCamera()
-    return () => stopCamera()
-  }, [facingMode])
-
-  const startCamera = async () => {
-    stopCamera()
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.onloadedmetadata = () => setCameraReady(true)
-      }
-    } catch {
-      setPhase('nocamera')
-    }
-  }
-
-  const stopCamera = () => {
+  // ── Stop camera ─────────────────────────────────────────────────────────────
+  const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     setCameraReady(false)
-  }
+  }, [])
 
+  // ── Start camera with progressive constraint fallback ────────────────────────
+  const startCamera = useCallback(async (facing: 'environment' | 'user' = 'environment') => {
+    stopCamera()
+    setCameraErrorMsg('')
+
+    // HTTPS guard
+    if (
+      typeof window !== 'undefined' &&
+      window.location.protocol !== 'https:' &&
+      window.location.hostname !== 'localhost'
+    ) {
+      setPhase('nocamera')
+      setCameraErrorMsg('Camera requires a secure (HTTPS) connection. Please access this page over HTTPS.')
+      return
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setPhase('nocamera')
+      setCameraErrorMsg('Your browser does not support camera access. Try Chrome or Safari.')
+      return
+    }
+
+    // Try progressively relaxed constraints
+    const constraintSets: MediaStreamConstraints[] = [
+      { video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+      ...(facing === 'environment'
+        ? [{ video: { facingMode: { exact: 'environment' } } } as MediaStreamConstraints]
+        : []),
+      { video: true },
+    ]
+
+    let lastError: unknown = null
+    for (const constraints of constraintSets) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        streamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play().catch(() => {})
+            setCameraReady(true)
+          }
+        }
+        return // success — stop trying
+      } catch (err) {
+        lastError = err
+        const name = (err as DOMException).name
+        // Permission denied — no point trying other constraints
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') break
+      }
+    }
+
+    // Parse the final error
+    const errName = (lastError as DOMException)?.name || ''
+    if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+      setPhase('permission')
+      setCameraErrorMsg('Camera permission was denied. Please allow camera access in your browser settings and try again.')
+    } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+      setPhase('nocamera')
+      setCameraErrorMsg('No camera was found on this device.')
+    } else {
+      setPhase('nocamera')
+      setCameraErrorMsg(`Camera error: ${(lastError as DOMException)?.message || errName || 'Unknown error'}`)
+    }
+  }, [stopCamera])
+
+  // Restart camera when facingMode changes (only during live camera phases)
+  useEffect(() => {
+    if (phase === 'front' || phase === 'back') {
+      startCamera(facingMode)
+    }
+  }, [facingMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup on unmount
+  useEffect(() => () => stopCamera(), [stopCamera])
+
+  // ── Capture frame from live video ───────────────────────────────────────────
   const captureFrame = (): string => {
-    const video = videoRef.current
+    const video  = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas) return ''
-    canvas.width = video.videoWidth || 1280
+    canvas.width  = video.videoWidth  || 1280
     canvas.height = video.videoHeight || 720
     canvas.getContext('2d')!.drawImage(video, 0, 0)
-    return canvas.toDataURL('image/png')  // stays in browser memory only
+    return canvas.toDataURL('image/jpeg', 0.92)
   }
 
+  // ── Camera captures ─────────────────────────────────────────────────────────
   const handleCaptureFront = () => {
     const dataUrl = captureFrame()
     if (!dataUrl) return
     setFrontImageData(dataUrl)
     setPhase('back')
+    startCamera(facingMode)
   }
 
   const handleCaptureBack = async () => {
-    const backDataUrl = captureFrame()
-    if (!backDataUrl || !frontImageData) return
+    const backUrl = captureFrame()
+    if (!backUrl || !frontImageData) return
+    stopCamera()
+    await runOcr(frontImageData, backUrl)
+  }
+
+  // ── Upload helpers ──────────────────────────────────────────────────────────
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((res, rej) => {
+      const reader = new FileReader()
+      reader.onload  = () => res(reader.result as string)
+      reader.onerror = () => rej(new Error('File read failed'))
+      reader.readAsDataURL(file)
+    })
+
+  const handleFrontFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const dataUrl = await fileToDataUrl(file)
+    setFrontImageData(dataUrl)
+    setPhase('upload_back')
+  }
+
+  const handleBackFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const dataUrl = await fileToDataUrl(file)
+    await runOcr(frontImageData, dataUrl)
+  }
+
+  const handleSkipBack = async () => {
+    await runOcr(frontImageData, '')
+  }
+
+  // ── OCR runner — Tesseract.js v4 + v5 compatible ────────────────────────────
+  const runOcr = async (frontUrl: string, backUrl: string) => {
     setPhase('processing')
     setOcrProgress(0)
-    stopCamera()
+    setOcrError('')
 
     try {
-      // Dynamically load Tesseract.js — only loaded when user opens scanner
-      // @ts-ignore
-      const Tesseract = await import('tesseract.js')
+      const TesseractModule = await import('tesseract.js')
 
-      const processImage = async (dataUrl: string, label: string): Promise<string> => {
-        const result = await Tesseract.recognize(dataUrl, 'eng', {
-          logger: (m: any) => {
-            if (m.status === 'recognizing text') {
-              setOcrProgress(prev => Math.max(prev, label === 'front' ? m.progress * 50 : 50 + m.progress * 50))
-            }
-          }
-        })
-        return result.data.text
+      // v5 exports `recognize` directly at root;
+      // v4 has it on `.default` or as a named export
+      const recognize: Function =
+        (TesseractModule as any).recognize ??
+        (TesseractModule as any).default?.recognize
+
+      if (typeof recognize !== 'function') {
+        throw new Error(
+          'tesseract.js not found or version incompatible. Run: npm install tesseract.js'
+        )
       }
 
-      const [frontText, backText] = await Promise.all([
-        processImage(frontImageData, 'front'),
-        processImage(backDataUrl, 'back'),
-      ])
+      const doRecognize = async (dataUrl: string, progressOffset: number): Promise<string> => {
+        if (!dataUrl) return ''
+        const result = await recognize(dataUrl, 'eng', {
+          logger: (m: { status: string; progress: number }) => {
+            if (m.status === 'recognizing text') {
+              setOcrProgress(Math.round(progressOffset + m.progress * 45))
+            }
+          },
+        })
+        return (result as any)?.data?.text ?? ''
+      }
 
-      const combined = frontText + '\n' + backText
-      const parsed = parseAadhaarText(combined)
+      setOcrProgress(5)
+      const frontText = await doRecognize(frontUrl, 5)
+      setOcrProgress(50)
+      const backText  = await doRecognize(backUrl, 50)
+      setOcrProgress(100)
+
+      const parsed = parseAadhaarText(frontText + '\n' + backText)
       setExtracted(parsed)
       setPhase('review')
-    } catch (e) {
-      console.error('OCR error:', e)
-      setOcrError('OCR failed. Make sure tesseract.js is installed: npm install tesseract.js')
+    } catch (err: any) {
+      console.error('OCR error:', err)
+      setOcrError(
+        err?.message?.includes('tesseract')
+          ? err.message
+          : `OCR failed: ${err?.message ?? 'unknown error'}. Make sure you have run: npm install tesseract.js`
+      )
       setPhase('error')
     }
   }
 
-  // ── Parse raw OCR text to extract Aadhaar fields ──────────────────────────
+  // ── Parse OCR text → AadhaarData ────────────────────────────────────────────
   const parseAadhaarText = (text: string): Partial<AadhaarData> => {
     const result: Partial<AadhaarData> = {}
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
 
     // Aadhaar number: 4-4-4 digit pattern
     const aadhaarMatch = text.match(/\b(\d{4}[\s\-]?\d{4}[\s\-]?\d{4})\b/)
-    if (aadhaarMatch) {
-      result.aadhaar = aadhaarMatch[1].replace(/[\s\-]/g, '')
-    }
+    if (aadhaarMatch) result.aadhaar = aadhaarMatch[1].replace(/[\s\-]/g, '')
 
-    // DOB: DD/MM/YYYY or DD-MM-YYYY
-    const dobMatch = text.match(/(?:DOB|Date of Birth|D\.O\.B)[:\s]*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i)
-      || text.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/)
+    // DOB
+    const dobMatch =
+      text.match(/(?:DOB|Date of Birth|D\.O\.B)[:\s]*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i) ||
+      text.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/)
     if (dobMatch) {
       const parts = dobMatch[1].split(/[\/\-]/)
-      if (parts.length === 3) {
-        result.dob = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`
-      }
+      if (parts.length === 3)
+        result.dob = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
     }
 
     // Gender
-    if (/\bMale\b/i.test(text)) result.gender = 'Male'
+    if (/\bMale\b/i.test(text))        result.gender = 'Male'
     else if (/\bFemale\b/i.test(text)) result.gender = 'Female'
 
-    // Name: usually the line after "Government of India" or before DOB line
-    // Strategy: find a line with 2-4 capitalized words, not containing digits or known keywords
-    const skipKeywords = /government|india|aadhaar|uidai|enrollment|enrolment|address|village|district|state|pin|dob|date|male|female|mobile|phone|\d/i
+    // Name: 2-4 capitalized words, no digits or known keywords
+    const skipKw = /government|india|aadhaar|uidai|enrollment|enrolment|address|village|district|state|pin|dob|date|male|female|mobile|phone|\d/i
     for (const line of lines) {
       const words = line.split(/\s+/)
-      const allCaps = words.every(w => /^[A-Z][a-zA-Z]+$/.test(w))
       if (
         words.length >= 2 && words.length <= 5 &&
-        !skipKeywords.test(line) &&
+        !skipKw.test(line) &&
         /^[A-Za-z\s]+$/.test(line) &&
         line.length > 4
       ) {
@@ -632,21 +753,37 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
       }
     }
 
-    // Address: lines after "Address:" or "S/O" "W/O" "D/O", join them
-    const addrStartIdx = lines.findIndex(l => /^(Address|S\/O|W\/O|D\/O|C\/O)/i.test(l))
-    if (addrStartIdx !== -1) {
-      const addrLines = lines.slice(addrStartIdx, addrStartIdx + 6).join(', ')
-      result.address = addrLines.replace(/^Address[:\s]*/i, '').trim()
+    // Address
+    const addrIdx = lines.findIndex(l => /^(Address|S\/O|W\/O|D\/O|C\/O)/i.test(l))
+    if (addrIdx !== -1) {
+      result.address = lines
+        .slice(addrIdx, addrIdx + 6)
+        .join(', ')
+        .replace(/^Address[:\s]*/i, '')
+        .trim()
     }
 
     return result
   }
 
+  // ── Reset to choose screen ───────────────────────────────────────────────────
+  const handleReset = () => {
+    stopCamera()
+    setPhase('choose')
+    setFrontImageData('')
+    setExtracted({})
+    setOcrError('')
+    setOcrProgress(0)
+    setCameraErrorMsg('')
+  }
+
+  // ── Apply and close ──────────────────────────────────────────────────────────
   const handleUse = () => {
     onExtracted(extracted)
     onClose()
   }
 
+  // ── Styles ───────────────────────────────────────────────────────────────────
   const inputStyle: React.CSSProperties = {
     background: T.bg, border: `1px solid ${T.border}`, color: T.text,
     fontSize: '15px', width: '100%', padding: '8px 12px', borderRadius: '10px', outline: 'none',
@@ -669,35 +806,67 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
               📇 Scan Aadhaar Card
             </h3>
             <p className="text-[10px] mt-0.5" style={{ color: T.textMuted }}>
-              {phase === 'front' && 'Step 1/2 — Capture the FRONT of the card'}
-              {phase === 'back' && 'Step 2/2 — Capture the BACK of the card'}
-              {phase === 'processing' && 'Reading card with OCR… (runs in your browser, nothing is uploaded)'}
-              {phase === 'review' && 'Review extracted details before using'}
-              {phase === 'error' && 'Something went wrong'}
-              {phase === 'nocamera' && 'Camera not available'}
+              {phase === 'choose'       && 'Choose how to provide the card'}
+              {phase === 'front'        && 'Step 1/2 — Capture the FRONT side'}
+              {phase === 'back'         && 'Step 2/2 — Capture the BACK side'}
+              {phase === 'upload_front' && 'Step 1/2 — Select the FRONT image'}
+              {phase === 'upload_back'  && 'Step 2/2 — Select the BACK image (optional)'}
+              {phase === 'processing'   && 'Reading card… (runs in your browser, nothing uploaded)'}
+              {phase === 'review'       && 'Review and correct before using'}
+              {phase === 'error'        && 'OCR error — check details below'}
+              {(phase === 'nocamera' || phase === 'permission') && 'Camera issue'}
             </p>
           </div>
           <button onClick={() => { stopCamera(); onClose() }} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
         </div>
 
+        {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
 
-          {/* Privacy notice */}
-          {(phase === 'front' || phase === 'back') && (
-            <div className="mb-3 px-3 py-2 rounded-xl text-[10px] font-medium flex items-start gap-2"
-              style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534' }}>
-              <span className="shrink-0 mt-0.5">🔒</span>
-              <span>100% private — OCR runs in your browser. The Aadhaar image never leaves your device.</span>
+          {/* ── CHOOSE MODE ──────────────────────────────────────────────── */}
+          {phase === 'choose' && (
+            <div>
+              <p className="text-xs mb-5" style={{ color: T.textSub }}>
+                OCR extracts Name, DOB, Gender, Aadhaar number and Address. Everything runs in your browser — nothing is sent to any server.
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={() => { setInputMode('camera'); setPhase('front'); startCamera('environment') }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl text-left"
+                  style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+                  <span className="text-3xl">📷</span>
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: T.text }}>Use Camera</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: T.textSub }}>Capture front and back live with your device camera</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setInputMode('upload'); setPhase('upload_front') }}
+                  className="w-full flex items-center gap-4 p-4 rounded-2xl text-left"
+                  style={{ background: T.bg, border: `1px solid ${T.border}` }}>
+                  <span className="text-3xl">🖼️</span>
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: T.text }}>Upload Image</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: T.textSub }}>Choose front + back photos from your gallery or files</p>
+                  </div>
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Camera view */}
+          {/* ── CAMERA: FRONT or BACK ─────────────────────────────────────── */}
           {(phase === 'front' || phase === 'back') && (
             <>
+              <div className="mb-3 px-3 py-2 rounded-xl text-[10px] font-medium flex items-start gap-2"
+                style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534' }}>
+                <span className="shrink-0 mt-0.5">🔒</span>
+                <span>Private: OCR runs in your browser. The card image never leaves your device.</span>
+              </div>
+
               <div className="relative rounded-2xl overflow-hidden mb-4 bg-black"
                 style={{ aspectRatio: '16/9', border: `2px solid ${T.accentBorder}` }}>
                 <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                {/* Aadhaar card aspect-ratio guide overlay */}
+                {/* Card outline guide */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="rounded-lg"
                     style={{
@@ -709,13 +878,14 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
                 <div className="absolute top-3 left-0 right-0 flex justify-center pointer-events-none">
                   <span className="text-white text-[10px] font-semibold px-3 py-1 rounded-full"
                     style={{ background: 'rgba(196,123,58,0.9)' }}>
-                    {phase === 'front' ? 'FRONT side — align card in frame' : 'BACK side — align card in frame'}
+                    {phase === 'front' ? 'FRONT — align card in frame' : 'BACK — align card in frame'}
                   </span>
                 </div>
                 {!cameraReady && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-3">
                     <div className="w-6 h-6 border-2 rounded-full animate-spin"
                       style={{ borderColor: T.accentBorder, borderTopColor: T.accent }} />
+                    <p className="text-white text-[11px]">Starting camera…</p>
                   </div>
                 )}
               </div>
@@ -729,9 +899,11 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
               )}
 
               <div className="flex gap-2">
-                <button onClick={() => setFacingMode(f => f === 'environment' ? 'user' : 'environment')}
+                <button
+                  onClick={() => setFacingMode(f => f === 'environment' ? 'user' : 'environment')}
                   className="px-3 py-3 rounded-xl text-sm font-medium"
-                  style={{ border: `1px solid ${T.border}`, color: T.textSub, background: T.bg }}>
+                  style={{ border: `1px solid ${T.border}`, color: T.textSub, background: T.bg }}
+                  title="Flip camera">
                   🔄
                 </button>
                 <button
@@ -747,10 +919,75 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
                   {phase === 'front' ? 'Capture Front' : 'Capture Back & Extract'}
                 </button>
               </div>
+
+              <button onClick={handleReset}
+                className="w-full mt-3 py-2 rounded-xl text-xs"
+                style={{ color: T.textMuted, border: `1px solid ${T.border}`, background: 'transparent' }}>
+                ← Back / Switch to Upload
+              </button>
             </>
           )}
 
-          {/* Processing */}
+          {/* ── UPLOAD: FRONT ────────────────────────────────────────────── */}
+          {phase === 'upload_front' && (
+            <div>
+              <div className="mb-4 px-3 py-2 rounded-xl text-[10px] font-medium flex items-start gap-2"
+                style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534' }}>
+                <span className="shrink-0 mt-0.5">🔒</span>
+                <span>Private: OCR runs in your browser. Images are never uploaded anywhere.</span>
+              </div>
+              <label className="flex flex-col items-center justify-center gap-3 w-full rounded-2xl cursor-pointer p-8"
+                style={{ background: T.accentLight, border: `2px dashed ${T.accentBorder}` }}>
+                <span className="text-4xl">📄</span>
+                <div className="text-center">
+                  <p className="text-sm font-semibold" style={{ color: T.text }}>Tap to select FRONT of Aadhaar</p>
+                  <p className="text-[11px] mt-1" style={{ color: T.textMuted }}>JPG, PNG, HEIC — choose from gallery or files</p>
+                </div>
+                <input type="file" accept="image/*" className="hidden" onChange={handleFrontFileChange} />
+              </label>
+              <button onClick={handleReset}
+                className="w-full mt-3 py-2 rounded-xl text-xs"
+                style={{ color: T.textMuted, border: `1px solid ${T.border}`, background: 'transparent' }}>
+                ← Back
+              </button>
+            </div>
+          )}
+
+          {/* ── UPLOAD: BACK ─────────────────────────────────────────────── */}
+          {phase === 'upload_back' && (
+            <div>
+              <div className="mb-3 px-3 py-2 rounded-xl text-xs font-medium"
+                style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534' }}>
+                ✓ Front image selected — now select the back (or skip)
+              </div>
+              {frontImageData && (
+                <div className="mb-4 rounded-xl overflow-hidden" style={{ border: `1px solid ${T.border}`, maxHeight: 120 }}>
+                  <img src={frontImageData} alt="Front preview" className="w-full object-cover" />
+                </div>
+              )}
+              <label className="flex flex-col items-center justify-center gap-3 w-full rounded-2xl cursor-pointer p-8"
+                style={{ background: T.accentLight, border: `2px dashed ${T.accentBorder}` }}>
+                <span className="text-4xl">📄</span>
+                <div className="text-center">
+                  <p className="text-sm font-semibold" style={{ color: T.text }}>Tap to select BACK of Aadhaar</p>
+                  <p className="text-[11px] mt-1" style={{ color: T.textMuted }}>Address is usually on the back</p>
+                </div>
+                <input type="file" accept="image/*" className="hidden" onChange={handleBackFileChange} />
+              </label>
+              <button onClick={handleSkipBack}
+                className="w-full mt-3 py-2.5 rounded-xl text-sm font-medium"
+                style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textSub }}>
+                Skip back — extract from front only
+              </button>
+              <button onClick={handleReset}
+                className="w-full mt-2 py-2 rounded-xl text-xs"
+                style={{ color: T.textMuted, border: `1px solid ${T.border}`, background: 'transparent' }}>
+                ← Back
+              </button>
+            </div>
+          )}
+
+          {/* ── PROCESSING ───────────────────────────────────────────────── */}
           {phase === 'processing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-5">
               <div className="relative w-16 h-16">
@@ -759,7 +996,7 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
                   <path d="M32 4a28 28 0 0128 28" stroke={T.accent} strokeWidth="4" strokeLinecap="round" />
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xs font-bold" style={{ color: T.accent }}>{Math.round(ocrProgress)}%</span>
+                  <span className="text-xs font-bold" style={{ color: T.accent }}>{ocrProgress}%</span>
                 </div>
               </div>
               <div className="text-center">
@@ -773,13 +1010,13 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* Error */}
+          {/* ── ERROR ────────────────────────────────────────────────────── */}
           {phase === 'error' && (
             <div className="text-center py-8">
               <p className="text-4xl mb-3">⚠️</p>
-              <p className="text-sm font-medium mb-1" style={{ color: '#991b1b' }}>OCR Failed</p>
-              <p className="text-xs mb-4" style={{ color: T.textMuted }}>{ocrError}</p>
-              <button onClick={() => { setPhase('front'); setFrontImageData(''); setOcrError(''); startCamera() }}
+              <p className="text-sm font-semibold mb-2" style={{ color: '#991b1b' }}>OCR Failed</p>
+              <p className="text-xs mb-5 leading-relaxed" style={{ color: T.textMuted }}>{ocrError}</p>
+              <button onClick={handleReset}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold"
                 style={{ background: T.accent, color: 'white' }}>
                 Try Again
@@ -787,18 +1024,34 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* No camera */}
-          {phase === 'nocamera' && (
-            <div className="text-center py-8">
-              <p className="text-4xl mb-3">📵</p>
-              <p className="text-sm font-medium mb-1" style={{ color: T.text }}>Camera not accessible</p>
-              <p className="text-xs" style={{ color: T.textMuted }}>
-                Please allow camera permissions in your browser settings and try again.
+          {/* ── NO CAMERA / PERMISSION ───────────────────────────────────── */}
+          {(phase === 'nocamera' || phase === 'permission') && (
+            <div className="text-center py-6">
+              <p className="text-4xl mb-3">{phase === 'permission' ? '🚫' : '📵'}</p>
+              <p className="text-sm font-semibold mb-2" style={{ color: T.text }}>
+                {phase === 'permission' ? 'Camera permission denied' : 'Camera not accessible'}
               </p>
+              <p className="text-xs mb-5 leading-relaxed px-2" style={{ color: T.textMuted }}>
+                {cameraErrorMsg || 'Please allow camera access in your browser settings and try again.'}
+              </p>
+              <div className="space-y-2">
+                <button
+                  onClick={() => { setPhase('front'); startCamera('environment') }}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold"
+                  style={{ background: T.accent, color: 'white' }}>
+                  Retry Camera
+                </button>
+                <button
+                  onClick={() => { setInputMode('upload'); setPhase('upload_front') }}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium"
+                  style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textSub }}>
+                  🖼️ Use Upload Instead
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Review */}
+          {/* ── REVIEW ───────────────────────────────────────────────────── */}
           {phase === 'review' && (
             <div>
               <div className="mb-4 px-3 py-2.5 rounded-xl text-xs font-medium"
@@ -832,9 +1085,8 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
                 <div>
                   <label className={labelCls} style={{ color: T.textSub }}>Aadhaar Number (12 digits)</label>
                   <input value={extracted.aadhaar || ''} style={inputStyle}
-                    placeholder="Not detected"
-                    maxLength={12}
-                    onChange={e => setExtracted(d => ({ ...d, aadhaar: e.target.value.replace(/\D/g,'').slice(0,12) }))} />
+                    placeholder="Not detected" maxLength={12}
+                    onChange={e => setExtracted(d => ({ ...d, aadhaar: e.target.value.replace(/\D/g, '').slice(0, 12) }))} />
                 </div>
                 <div>
                   <label className={labelCls} style={{ color: T.textSub }}>Address</label>
@@ -847,11 +1099,17 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
               <p className="text-[10px] mt-3" style={{ color: T.textMuted }}>
                 ℹ️ OCR accuracy depends on image quality. Always verify before saving.
               </p>
+              <button onClick={handleReset}
+                className="w-full mt-3 py-2 rounded-xl text-xs"
+                style={{ color: T.textMuted, border: `1px solid ${T.border}`, background: 'transparent' }}>
+                ← Scan Again
+              </button>
             </div>
           )}
-        </div>
 
-        {/* Footer */}
+        </div>{/* end body */}
+
+        {/* Footer — review only */}
         {phase === 'review' && (
           <div className="shrink-0 flex gap-3 p-4"
             style={{ borderTop: `1px solid ${T.border}`, paddingBottom: 'max(16px, env(safe-area-inset-bottom,16px))' }}>
@@ -867,18 +1125,13 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </button>
           </div>
         )}
+
       </div>
     </div>
   )
 }
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-// CHANGES vs original:
-//  1. Photo section is FIRST — before all other fields
-//  2. All fields below photo are locked (dimmed + non-interactive) until photo is verified
-//  3. Aadhaar scanner button auto-fills personal fields using browser-side OCR
-//  4. Name auto title-cases on blur (trim + proper case)
-
 function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   userName: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -926,8 +1179,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const [error, setError] = useState('')
 
   const minFees = Math.round(500 * parseFloat(months || '1'))
-
-  // Fields below photo locked until verified
   const fieldsLocked = !photoVerified
 
   useEffect(() => {
@@ -948,7 +1199,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const sd = (patch: Record<string, any>) => saveDraft(patch)
 
-  // ── Photo polling logic (unchanged from original) ──────────────────────────
   const doSingleCheck = async (): Promise<boolean> => {
     try {
       const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
@@ -1016,7 +1266,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     startAutoFlow()
   }
 
-  // ── Aadhaar scanner callback ───────────────────────────────────────────────
   const handleAadhaarExtracted = (data: Partial<AadhaarData>) => {
     if (data.name)    { const f = toTitleCase(data.name); setName(f); sd({ name: f }) }
     if (data.dob)     { setDob(data.dob); sd({ dob: data.dob }) }
@@ -1025,7 +1274,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     if (data.address) { setAddress(data.address); sd({ address: data.address }) }
   }
 
-  // ── Name: auto title-case on blur ──────────────────────────────────────────
   const handleNameBlur = () => {
     if (!name.trim()) return
     const formatted = toTitleCase(name)
@@ -1033,7 +1281,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     sd({ name: formatted })
   }
 
-  // ── Mobile lookup ──────────────────────────────────────────────────────────
   const handleMobileChange = async (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 10)
     setMobile(digits); sd({ mobile: digits }); setMobileError(''); setExistingStudent(null)
@@ -1132,7 +1379,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
-  // ── Photo section UI ───────────────────────────────────────────────────────
   const PhotoSection = () => {
     if (photoVerified) {
       return (
@@ -1148,9 +1394,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             <div className="flex-1">
               <p className="text-xs font-semibold" style={{ color: '#166534' }}>✓ Photo verified</p>
               <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>Linked to Register ID {regId}</p>
-              <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>
-                ✅ All fields are now unlocked
-              </p>
+              <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✅ All fields are now unlocked</p>
             </div>
             <button
               onClick={() => {
@@ -1261,7 +1505,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
         <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6"
           style={{ WebkitOverflowScrolling: 'touch' as any }}>
 
-          {/* Title */}
           <div className="flex items-start justify-between mb-5">
             <div>
               <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
@@ -1270,7 +1513,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
           </div>
 
-          {/* Draft restored banner */}
           {Object.keys(draft).length > 0 && (
             <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
               style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
@@ -1282,12 +1524,10 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </div>
           )}
 
-          {/* Timestamp */}
           <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
             🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </div>
 
-          {/* Register ID */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
             <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
@@ -1297,11 +1537,9 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </div>
           </div>
 
-          {/* ── PHOTO FIRST ───────────────────────────────────────────────────── */}
           <SectionLabel>📸 Photo Upload — Complete First</SectionLabel>
           <PhotoSection />
 
-          {/* Lock hint when photo not yet verified */}
           {fieldsLocked && (
             <div className="mt-3 mb-1 px-4 py-3 rounded-xl text-center text-xs font-medium"
               style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
@@ -1309,7 +1547,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </div>
           )}
 
-          {/* ── ALL OTHER FIELDS — locked until photo verified ─────────────────── */}
           <div style={{
             opacity: fieldsLocked ? 0.35 : 1,
             pointerEvents: fieldsLocked ? 'none' : 'auto',
@@ -1318,7 +1555,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
             <SectionLabel>👤 Personal Details</SectionLabel>
 
-            {/* Aadhaar scan button */}
             <button
               onClick={() => setShowAadhaarScanner(true)}
               className="w-full mb-4 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
@@ -1331,17 +1567,14 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
               📇 Scan Aadhaar Card — Auto-fill Details
             </button>
 
-            {/* Name */}
             <div className="mb-4">
               <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
               <input
-                type="text"
-                value={name}
+                type="text" value={name}
                 onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
                 onBlur={handleNameBlur}
                 placeholder="Enter full name"
-                className={inputCls}
-                style={inputStyle}
+                className={inputCls} style={inputStyle}
               />
               {name.trim() && toTitleCase(name) !== name && (
                 <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
@@ -1350,7 +1583,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
               )}
             </div>
 
-            {/* Mobile */}
             <div className="mb-4">
               <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
               <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
@@ -1396,7 +1628,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
               )}
             </div>
 
-            {/* Gender + DOB */}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
@@ -1417,7 +1648,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
               </div>
             </div>
 
-            {/* Aadhar */}
             <div className="mb-4">
               <label className={labelCls} style={{ color: T.textSub }}>
                 Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
@@ -1427,7 +1657,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
                 placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
             </div>
 
-            {/* Address */}
             <div className="mb-4">
               <label className={labelCls} style={{ color: T.textSub }}>Address</label>
               <textarea value={address}
@@ -1531,7 +1760,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
           )}
         </div>
 
-        {/* Footer */}
         <div className="shrink-0 flex gap-3 p-4 pt-3"
           style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
           <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
@@ -1554,7 +1782,6 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
         </div>
       </ModalShell>
 
-      {/* Aadhaar scanner — rendered above everything else */}
       {showAadhaarScanner && (
         <AadhaarScannerModal
           onClose={() => setShowAadhaarScanner(false)}
