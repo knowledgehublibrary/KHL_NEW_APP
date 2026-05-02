@@ -477,19 +477,12 @@ function clearDraft() {
   try { sessionStorage.removeItem(DRAFT_KEY) } catch {}
 }
 
-// ─── AADHAAR SCANNER MODAL ────────────────────────────────────────────────────
-// Fixed version:
-//  1. Progressive camera constraint fallback (no more OverconstrainedError)
-//  2. Proper error differentiation: NotAllowedError vs NotFoundError vs HTTPS
-//  3. Tesseract.js v4 + v5 compatible
-//  4. Upload mode: pick front + back images from device
-//  5. "Use Upload Instead" escape hatch on camera error screen
-
+// ─── AADHAAR TYPES ────────────────────────────────────────────────────────────
 type AadhaarData = {
   name: string
-  dob: string       // YYYY-MM-DD
+  dob: string
   gender: string
-  aadhaar: string   // 12 digits
+  aadhaar: string
   address: string
 }
 
@@ -506,6 +499,10 @@ type ScanPhase =
   | 'nocamera'
   | 'permission'
 
+// ─── AADHAAR SCANNER MODAL ────────────────────────────────────────────────────
+// Rendered at ROOT level (inside Home's return, NOT inside NewAdmissionPopup)
+// so it is never trapped inside another stacking context.
+// z-[80] beats ModalShell z-50 and ConfirmModal z-[60] cleanly.
 function AadhaarScannerModal({ onClose, onExtracted }: {
   onClose: () => void
   onExtracted: (data: Partial<AadhaarData>) => void
@@ -514,36 +511,33 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  const [phase, setPhase]             = useState<ScanPhase>('choose')
-  const [inputMode, setInputMode]     = useState<InputMode>('camera')
+  const [phase, setPhase]                   = useState<ScanPhase>('choose')
+  const [inputMode, setInputMode]           = useState<InputMode>('camera')
   const [frontImageData, setFrontImageData] = useState<string>('')
-  const [extracted, setExtracted]     = useState<Partial<AadhaarData>>({})
-  const [ocrError, setOcrError]       = useState('')
-  const [cameraReady, setCameraReady] = useState(false)
-  const [facingMode, setFacingMode]   = useState<'environment' | 'user'>('environment')
-  const [ocrProgress, setOcrProgress] = useState(0)
+  const [extracted, setExtracted]           = useState<Partial<AadhaarData>>({})
+  const [ocrError, setOcrError]             = useState('')
+  const [cameraReady, setCameraReady]       = useState(false)
+  const [facingMode, setFacingMode]         = useState<'environment' | 'user'>('environment')
+  const [ocrProgress, setOcrProgress]       = useState(0)
   const [cameraErrorMsg, setCameraErrorMsg] = useState('')
 
-  // ── Stop camera ─────────────────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     setCameraReady(false)
   }, [])
 
-  // ── Start camera with progressive constraint fallback ────────────────────────
   const startCamera = useCallback(async (facing: 'environment' | 'user' = 'environment') => {
     stopCamera()
     setCameraErrorMsg('')
 
-    // HTTPS guard
     if (
       typeof window !== 'undefined' &&
       window.location.protocol !== 'https:' &&
       window.location.hostname !== 'localhost'
     ) {
       setPhase('nocamera')
-      setCameraErrorMsg('Camera requires a secure (HTTPS) connection. Please access this page over HTTPS.')
+      setCameraErrorMsg('Camera requires a secure (HTTPS) connection.')
       return
     }
 
@@ -553,7 +547,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
       return
     }
 
-    // Try progressively relaxed constraints
     const constraintSets: MediaStreamConstraints[] = [
       { video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } },
       ...(facing === 'environment'
@@ -574,20 +567,18 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             setCameraReady(true)
           }
         }
-        return // success — stop trying
+        return
       } catch (err) {
         lastError = err
         const name = (err as DOMException).name
-        // Permission denied — no point trying other constraints
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') break
       }
     }
 
-    // Parse the final error
     const errName = (lastError as DOMException)?.name || ''
     if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
       setPhase('permission')
-      setCameraErrorMsg('Camera permission was denied. Please allow camera access in your browser settings and try again.')
+      setCameraErrorMsg('Camera permission was denied. Please allow camera access in your browser settings.')
     } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
       setPhase('nocamera')
       setCameraErrorMsg('No camera was found on this device.')
@@ -597,17 +588,12 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     }
   }, [stopCamera])
 
-  // Restart camera when facingMode changes (only during live camera phases)
   useEffect(() => {
-    if (phase === 'front' || phase === 'back') {
-      startCamera(facingMode)
-    }
+    if (phase === 'front' || phase === 'back') startCamera(facingMode)
   }, [facingMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cleanup on unmount
   useEffect(() => () => stopCamera(), [stopCamera])
 
-  // ── Capture frame from live video ───────────────────────────────────────────
   const captureFrame = (): string => {
     const video  = videoRef.current
     const canvas = canvasRef.current
@@ -618,7 +604,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     return canvas.toDataURL('image/jpeg', 0.92)
   }
 
-  // ── Camera captures ─────────────────────────────────────────────────────────
   const handleCaptureFront = () => {
     const dataUrl = captureFrame()
     if (!dataUrl) return
@@ -634,7 +619,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     await runOcr(frontImageData, backUrl)
   }
 
-  // ── Upload helpers ──────────────────────────────────────────────────────────
   const fileToDataUrl = (file: File): Promise<string> =>
     new Promise((res, rej) => {
       const reader = new FileReader()
@@ -662,7 +646,8 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     await runOcr(frontImageData, '')
   }
 
-  // ── OCR runner — Tesseract.js v4 + v5 compatible ────────────────────────────
+  // Tesseract dynamic import — works on Vercel because OCR runs in the browser,
+  // not on the server. The worker JS is fetched from jsDelivr CDN at runtime.
   const runOcr = async (frontUrl: string, backUrl: string) => {
     setPhase('processing')
     setOcrProgress(0)
@@ -671,16 +656,12 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     try {
       const TesseractModule = await import('tesseract.js')
 
-      // v5 exports `recognize` directly at root;
-      // v4 has it on `.default` or as a named export
       const recognize: Function =
         (TesseractModule as any).recognize ??
         (TesseractModule as any).default?.recognize
 
       if (typeof recognize !== 'function') {
-        throw new Error(
-          'tesseract.js not found or version incompatible. Run: npm install tesseract.js'
-        )
+        throw new Error('tesseract.js not found. Run: npm install tesseract.js')
       }
 
       const doRecognize = async (dataUrl: string, progressOffset: number): Promise<string> => {
@@ -709,22 +690,19 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
       setOcrError(
         err?.message?.includes('tesseract')
           ? err.message
-          : `OCR failed: ${err?.message ?? 'unknown error'}. Make sure you have run: npm install tesseract.js`
+          : `OCR failed: ${err?.message ?? 'unknown error'}`
       )
       setPhase('error')
     }
   }
 
-  // ── Parse OCR text → AadhaarData ────────────────────────────────────────────
   const parseAadhaarText = (text: string): Partial<AadhaarData> => {
     const result: Partial<AadhaarData> = {}
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
 
-    // Aadhaar number: 4-4-4 digit pattern
     const aadhaarMatch = text.match(/\b(\d{4}[\s\-]?\d{4}[\s\-]?\d{4})\b/)
     if (aadhaarMatch) result.aadhaar = aadhaarMatch[1].replace(/[\s\-]/g, '')
 
-    // DOB
     const dobMatch =
       text.match(/(?:DOB|Date of Birth|D\.O\.B)[:\s]*(\d{2}[\/\-]\d{2}[\/\-]\d{4})/i) ||
       text.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{4})\b/)
@@ -734,11 +712,9 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
         result.dob = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
     }
 
-    // Gender
     if (/\bMale\b/i.test(text))        result.gender = 'Male'
     else if (/\bFemale\b/i.test(text)) result.gender = 'Female'
 
-    // Name: 2-4 capitalized words, no digits or known keywords
     const skipKw = /government|india|aadhaar|uidai|enrollment|enrolment|address|village|district|state|pin|dob|date|male|female|mobile|phone|\d/i
     for (const line of lines) {
       const words = line.split(/\s+/)
@@ -753,7 +729,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
       }
     }
 
-    // Address
     const addrIdx = lines.findIndex(l => /^(Address|S\/O|W\/O|D\/O|C\/O)/i.test(l))
     if (addrIdx !== -1) {
       result.address = lines
@@ -766,7 +741,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     return result
   }
 
-  // ── Reset to choose screen ───────────────────────────────────────────────────
   const handleReset = () => {
     stopCamera()
     setPhase('choose')
@@ -777,13 +751,11 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
     setCameraErrorMsg('')
   }
 
-  // ── Apply and close ──────────────────────────────────────────────────────────
   const handleUse = () => {
     onExtracted(extracted)
     onClose()
   }
 
-  // ── Styles ───────────────────────────────────────────────────────────────────
   const inputStyle: React.CSSProperties = {
     background: T.bg, border: `1px solid ${T.border}`, color: T.text,
     fontSize: '15px', width: '100%', padding: '8px 12px', borderRadius: '10px', outline: 'none',
@@ -791,8 +763,9 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
   const labelCls = 'text-[10px] uppercase tracking-widest mb-1 block font-medium'
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4"
-      style={{ background: 'rgba(28,25,23,0.8)', backdropFilter: 'blur(8px)' }}>
+    // z-[80] — above ModalShell (z-50) and ConfirmModal (z-[60])
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center sm:p-4"
+      style={{ background: 'rgba(28,25,23,0.85)', backdropFilter: 'blur(8px)' }}>
       <div className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
         style={{ background: T.surface, border: `1px solid ${T.border}`, maxHeight: 'calc(100dvh - 40px)' }}>
 
@@ -823,7 +796,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
 
-          {/* ── CHOOSE MODE ──────────────────────────────────────────────── */}
           {phase === 'choose' && (
             <div>
               <p className="text-xs mb-5" style={{ color: T.textSub }}>
@@ -854,7 +826,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* ── CAMERA: FRONT or BACK ─────────────────────────────────────── */}
           {(phase === 'front' || phase === 'back') && (
             <>
               <div className="mb-3 px-3 py-2 rounded-xl text-[10px] font-medium flex items-start gap-2"
@@ -866,7 +837,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
               <div className="relative rounded-2xl overflow-hidden mb-4 bg-black"
                 style={{ aspectRatio: '16/9', border: `2px solid ${T.accentBorder}` }}>
                 <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                {/* Card outline guide */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="rounded-lg"
                     style={{
@@ -928,7 +898,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </>
           )}
 
-          {/* ── UPLOAD: FRONT ────────────────────────────────────────────── */}
           {phase === 'upload_front' && (
             <div>
               <div className="mb-4 px-3 py-2 rounded-xl text-[10px] font-medium flex items-start gap-2"
@@ -953,7 +922,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* ── UPLOAD: BACK ─────────────────────────────────────────────── */}
           {phase === 'upload_back' && (
             <div>
               <div className="mb-3 px-3 py-2 rounded-xl text-xs font-medium"
@@ -987,7 +955,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* ── PROCESSING ───────────────────────────────────────────────── */}
           {phase === 'processing' && (
             <div className="flex flex-col items-center justify-center py-10 gap-5">
               <div className="relative w-16 h-16">
@@ -1010,7 +977,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* ── ERROR ────────────────────────────────────────────────────── */}
           {phase === 'error' && (
             <div className="text-center py-8">
               <p className="text-4xl mb-3">⚠️</p>
@@ -1024,7 +990,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* ── NO CAMERA / PERMISSION ───────────────────────────────────── */}
           {(phase === 'nocamera' || phase === 'permission') && (
             <div className="text-center py-6">
               <p className="text-4xl mb-3">{phase === 'permission' ? '🚫' : '📵'}</p>
@@ -1051,7 +1016,6 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </div>
           )}
 
-          {/* ── REVIEW ───────────────────────────────────────────────────── */}
           {phase === 'review' && (
             <div>
               <div className="mb-4 px-3 py-2.5 rounded-xl text-xs font-medium"
@@ -1106,10 +1070,8 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
               </button>
             </div>
           )}
+        </div>
 
-        </div>{/* end body */}
-
-        {/* Footer — review only */}
         {phase === 'review' && (
           <div className="shrink-0 flex gap-3 p-4"
             style={{ borderTop: `1px solid ${T.border}`, paddingBottom: 'max(16px, env(safe-area-inset-bottom,16px))' }}>
@@ -1125,46 +1087,44 @@ function AadhaarScannerModal({ onClose, onExtracted }: {
             </button>
           </div>
         )}
-
       </div>
     </div>
   )
 }
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-function NewAdmissionPopup({ userName, onClose, onSuccess }: {
-  userName: string; onClose: () => void; onSuccess: () => void
+// NOTE: AadhaarScannerModal is NOT rendered here anymore.
+// onOpenAadhaarScanner is called to lift it up to the page level.
+function NewAdmissionPopup({ userName, onClose, onSuccess, onOpenAadhaarScanner }: {
+  userName: string
+  onClose: () => void
+  onSuccess: () => void
+  onOpenAadhaarScanner: (callback: (data: Partial<AadhaarData>) => void) => void
 }) {
   const draft = loadDraft()
 
   const [regId, setRegId] = useState('')
   const [regIdLoading, setRegIdLoading] = useState(true)
 
-  // ── Photo ──────────────────────────────────────────────────────────────────
-  const [photoVerified, setPhotoVerified] = useState(false)
-  const [photoUrl, setPhotoUrl] = useState('')
+  const [photoVerified, setPhotoVerified]     = useState(false)
+  const [photoUrl, setPhotoUrl]               = useState('')
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState('')
-  const [photoPhase, setPhotoPhase] = useState<'idle' | 'countdown' | 'polling' | 'done' | 'failed'>('idle')
-  const [photoCountdown, setPhotoCountdown] = useState(30)
-  const [pollCountdown, setPollCountdown] = useState(5)
-  const [photoError, setPhotoError] = useState('')
-  const pollingRef = useRef<{ stop: () => void } | null>(null)
+  const [photoPhase, setPhotoPhase]           = useState<'idle' | 'countdown' | 'polling' | 'done' | 'failed'>('idle')
+  const [photoCountdown, setPhotoCountdown]   = useState(30)
+  const [pollCountdown, setPollCountdown]     = useState(5)
+  const [photoError, setPhotoError]           = useState('')
+  const pollingRef                            = useRef<{ stop: () => void } | null>(null)
   const [instantChecking, setInstantChecking] = useState(false)
 
-  // ── Aadhaar scanner ────────────────────────────────────────────────────────
-  const [showAadhaarScanner, setShowAadhaarScanner] = useState(false)
-
-  // ── Personal fields ────────────────────────────────────────────────────────
   const [name, setName]       = useState(draft.name || '')
   const [mobile, setMobile]   = useState(draft.mobile || '')
-  const [mobileError, setMobileError] = useState('')
+  const [mobileError, setMobileError]         = useState('')
   const [existingStudent, setExistingStudent] = useState<any | null>(null)
   const [address, setAddress] = useState(draft.address || '')
   const [gender, setGender]   = useState(draft.gender || '')
   const [dob, setDob]         = useState(draft.dob || '')
   const [aadhar, setAadhar]   = useState(draft.aadhar || '')
 
-  // ── Admission fields ───────────────────────────────────────────────────────
   const now = new Date().toISOString()
   const [startDate, setStartDate]           = useState(draft.startDate || toInputDate(now))
   const [months, setMonths]                 = useState(draft.months || '1')
@@ -1176,9 +1136,9 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const [comment, setComment]               = useState(draft.comment || '')
 
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError]   = useState('')
 
-  const minFees = Math.round(500 * parseFloat(months || '1'))
+  const minFees    = Math.round(500 * parseFloat(months || '1'))
   const fieldsLocked = !photoVerified
 
   useEffect(() => {
@@ -1201,7 +1161,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const doSingleCheck = async (): Promise<boolean> => {
     try {
-      const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
+      const res  = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
       const json = await res.json()
       if (json.status === 'found' && json.url) {
         setPhotoUrl(json.url)
@@ -1218,8 +1178,8 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const beginPolling = (stopped: { value: boolean }) => {
     setPhotoPhase('polling')
     const startedAt = Date.now()
-    const MAX_MS = 3 * 60 * 1000
-    const runCycle = async () => {
+    const MAX_MS    = 3 * 60 * 1000
+    const runCycle  = async () => {
       if (stopped.value) return
       if (Date.now() - startedAt > MAX_MS) {
         setPhotoPhase('failed')
@@ -1266,6 +1226,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     startAutoFlow()
   }
 
+  // Called when AadhaarScannerModal (at page level) returns data
   const handleAadhaarExtracted = (data: Partial<AadhaarData>) => {
     if (data.name)    { const f = toTitleCase(data.name); setName(f); sd({ name: f }) }
     if (data.dob)     { setDob(data.dob); sd({ dob: data.dob }) }
@@ -1277,8 +1238,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const handleNameBlur = () => {
     if (!name.trim()) return
     const formatted = toTitleCase(name)
-    setName(formatted)
-    sd({ name: formatted })
+    setName(formatted); sd({ name: formatted })
   }
 
   const handleMobileChange = async (val: string) => {
@@ -1301,8 +1261,8 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   }
 
   const handleMonthsChange = (val: string) => {
-    const prevMin = Math.round(500 * parseFloat(months || '1'))
-    const newMin  = Math.round(500 * parseFloat(val || '1'))
+    const prevMin    = Math.round(500 * parseFloat(months || '1'))
+    const newMin     = Math.round(500 * parseFloat(val || '1'))
     setMonths(val); sd({ months: val })
     const currentFees = parseFloat(finalFees)
     if (isNaN(currentFees) || currentFees === prevMin) {
@@ -1316,7 +1276,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const handleFeesChange = (val: string) => {
     setFinalFees(val); setFeesSubmitted(val); sd({ finalFees: val, feesSubmitted: val })
-    const parsed = parseFloat(val)
+    const parsed     = parseFloat(val)
     const currentMin = Math.round(500 * parseFloat(months || '1'))
     if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
     else if (error.startsWith('Minimum fees')) setError('')
@@ -1333,7 +1293,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     setError('')
     if (!name.trim() || name.trim().length < 2)            { setError('Name must be at least 2 characters.'); return }
     if (mobile.length !== 10)                               { setError('Mobile number must be exactly 10 digits.'); return }
-    if (mobileError === 'exists')                           { setError('This mobile is already registered. View the student card above.'); return }
+    if (mobileError === 'exists')                           { setError('This mobile is already registered.'); return }
     if (!gender)                                            { setError('Please select a gender.'); return }
     if (!dob)                                               { setError('Date of birth is required.'); return }
     if (new Date(dob) >= new Date())                        { setError('Date of birth must be in the past.'); return }
@@ -1373,8 +1333,8 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     onClose()
   }
 
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
-  const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
+  const inputStyle: React.CSSProperties      = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
+  const readonlyStyle: React.CSSProperties   = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const errorInputStyle: React.CSSProperties = { ...inputStyle, border: '1px solid #fca5a5' }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
@@ -1494,301 +1454,291 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   }
 
   return (
-    <>
-      <ModalShell onBackdropClick={onClose}>
-        <div className="h-[3px] rounded-t-2xl shrink-0"
-          style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-        <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
-          <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
+    <ModalShell onBackdropClick={onClose}>
+      <div className="h-[3px] rounded-t-2xl shrink-0"
+        style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
+      <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+        <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
+      </div>
+
+      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6"
+        style={{ WebkitOverflowScrolling: 'touch' as any }}>
+
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
+            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>Upload photo first — remaining fields unlock after verification</p>
+          </div>
+          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
         </div>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6"
-          style={{ WebkitOverflowScrolling: 'touch' as any }}>
-
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
-              <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>Upload photo first — remaining fields unlock after verification</p>
-            </div>
-            <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
+        {Object.keys(draft).length > 0 && (
+          <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
+            style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+            <p className="text-[10px]" style={{ color: T.accent }}>📝 Draft restored from your last session</p>
+            <button onClick={() => { clearDraft(); onClose() }}
+              className="text-[10px] underline ml-2" style={{ color: T.textMuted }}>
+              Discard
+            </button>
           </div>
+        )}
 
-          {Object.keys(draft).length > 0 && (
-            <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
-              style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
-              <p className="text-[10px]" style={{ color: T.accent }}>📝 Draft restored from your last session</p>
-              <button onClick={() => { clearDraft(); onClose() }}
-                className="text-[10px] underline ml-2" style={{ color: T.textMuted }}>
-                Discard
-              </button>
-            </div>
-          )}
+        <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
+          🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </div>
 
-          <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
-            🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        <div className="mb-4">
+          <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
+          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
+            {regIdLoading
+              ? <span className="animate-pulse text-xs">Fetching…</span>
+              : <span className="font-semibold" style={{ color: T.text }}>{regId || '—'}</span>}
+          </div>
+        </div>
+
+        <SectionLabel>📸 Photo Upload — Complete First</SectionLabel>
+        <PhotoSection />
+
+        {fieldsLocked && (
+          <div className="mt-3 mb-1 px-4 py-3 rounded-xl text-center text-xs font-medium"
+            style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
+            🔒 Verify photo above to unlock the rest of the form
+          </div>
+        )}
+
+        <div style={{
+          opacity: fieldsLocked ? 0.35 : 1,
+          pointerEvents: fieldsLocked ? 'none' : 'auto',
+          transition: 'opacity 0.35s ease',
+        }}>
+          <SectionLabel>👤 Personal Details</SectionLabel>
+
+          {/* Scan Aadhaar button — opens scanner at PAGE level via prop */}
+          <button
+            onClick={() => onOpenAadhaarScanner(handleAadhaarExtracted)}
+            className="w-full mb-4 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
+            style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            📇 Scan Aadhaar Card — Auto-fill Details
+          </button>
+
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
+            <input
+              type="text" value={name}
+              onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
+              onBlur={handleNameBlur}
+              placeholder="Enter full name"
+              className={inputCls} style={inputStyle}
+            />
+            {name.trim() && toTitleCase(name) !== name && (
+              <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+                Will save as: <span className="font-semibold" style={{ color: T.text }}>{toTitleCase(name)}</span>
+              </p>
+            )}
           </div>
 
           <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
-              {regIdLoading
-                ? <span className="animate-pulse text-xs">Fetching…</span>
-                : <span className="font-semibold" style={{ color: T.text }}>{regId || '—'}</span>}
+            <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
+            <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
+              placeholder="10-digit mobile" maxLength={10} className={inputCls}
+              style={existingStudent ? errorInputStyle : inputStyle} />
+            {existingStudent && (
+              <div className="mt-2">
+                <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: T.textMuted }}>
+                  Number already registered for:
+                </p>
+                <Link
+                  href={`/student/${existingStudent.mobile_number}`}
+                  onClick={onClose}
+                  className="flex items-center gap-3 p-3 rounded-xl"
+                  style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}>
+                  <div className="relative shrink-0">
+                    <img
+                      src={getProxyUrl(existingStudent.image_url) || '/default-avatar.png'}
+                      onError={(e) => { e.currentTarget.src = '/default-avatar.png' }}
+                      className="w-10 h-10 rounded-lg object-cover"
+                      style={{ border: `1px solid ${T.border}` }} />
+                    <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
+                      style={{
+                        borderColor: T.surface,
+                        background: existingStudent.status?.includes('Active') ? '#16a34a'
+                          : existingStudent.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
+                          : existingStudent.status?.toLowerCase().includes('blocked') ? '#9ca3af'
+                          : '#dc2626',
+                      }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+                      {existingStudent.name}
+                    </p>
+                    <p className="text-[10px] mt-0.5" style={{ color: T.textMuted }}>{existingStudent.mobile_number}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <StatusBadge status={existingStudent.status} />
+                    <span className="text-[10px]" style={{ color: T.textMuted }}>Tap to view →</span>
+                  </div>
+                </Link>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
+              <select value={gender}
+                onChange={(e) => { setGender(e.target.value); sd({ gender: e.target.value }) }}
+                className={inputCls + ' appearance-none'} style={inputStyle}>
+                <option value="">Select…</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Date of Birth *</label>
+              <input type="date" value={dob}
+                onChange={(e) => { setDob(e.target.value); sd({ dob: e.target.value }) }}
+                max={toInputDate(new Date().toISOString())} className={inputCls} style={inputStyle} />
             </div>
           </div>
 
-          <SectionLabel>📸 Photo Upload — Complete First</SectionLabel>
-          <PhotoSection />
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>
+              Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
+            </label>
+            <input type="text" value={aadhar}
+              onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 12); setAadhar(v); sd({ aadhar: v }) }}
+              placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
+          </div>
 
-          {fieldsLocked && (
-            <div className="mt-3 mb-1 px-4 py-3 rounded-xl text-center text-xs font-medium"
-              style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
-              🔒 Verify photo above to unlock the rest of the form
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Address</label>
+            <textarea value={address}
+              onChange={(e) => { setAddress(e.target.value); sd({ address: e.target.value }) }}
+              rows={2} placeholder="Full address (optional)" className={inputCls + ' resize-none'} style={inputStyle} />
+          </div>
+
+          <SectionLabel>📋 Admission Details</SectionLabel>
+
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
+            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>New</div>
+          </div>
+
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
+            <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+              className={inputCls} style={inputStyle} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+              <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
+                min="1" className={inputCls} style={inputStyle} />
             </div>
-          )}
-
-          <div style={{
-            opacity: fieldsLocked ? 0.35 : 1,
-            pointerEvents: fieldsLocked ? 'none' : 'auto',
-            transition: 'opacity 0.35s ease',
-          }}>
-
-            <SectionLabel>👤 Personal Details</SectionLabel>
-
-            <button
-              onClick={() => setShowAadhaarScanner(true)}
-              className="w-full mb-4 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
-              style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              📇 Scan Aadhaar Card — Auto-fill Details
-            </button>
-
-            <div className="mb-4">
-              <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
-              <input
-                type="text" value={name}
-                onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
-                onBlur={handleNameBlur}
-                placeholder="Enter full name"
-                className={inputCls} style={inputStyle}
-              />
-              {name.trim() && toTitleCase(name) !== name && (
-                <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
-                  Will save as: <span className="font-semibold" style={{ color: T.text }}>{toTitleCase(name)}</span>
-                </p>
-              )}
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
+              <input type="number" value={seat}
+                onChange={(e) => { setSeat(e.target.value); sd({ seat: e.target.value }) }}
+                min="0" max="92" className={inputCls} style={inputStyle} />
             </div>
+          </div>
 
-            <div className="mb-4">
-              <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
-              <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
-                placeholder="10-digit mobile" maxLength={10} className={inputCls}
-                style={existingStudent ? errorInputStyle : inputStyle} />
-              {existingStudent && (
-                <div className="mt-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: T.textMuted }}>
-                    Number already registered for:
-                  </p>
-                  <Link
-                    href={`/student/${existingStudent.mobile_number}`}
-                    onClick={onClose}
-                    className="flex items-center gap-3 p-3 rounded-xl"
-                    style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}>
-                    <div className="relative shrink-0">
-                      <img
-                        src={getProxyUrl(existingStudent.image_url) || '/default-avatar.png'}
-                        onError={(e) => { e.currentTarget.src = '/default-avatar.png' }}
-                        className="w-10 h-10 rounded-lg object-cover"
-                        style={{ border: `1px solid ${T.border}` }} />
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
-                        style={{
-                          borderColor: T.surface,
-                          background: existingStudent.status?.includes('Active') ? '#16a34a'
-                            : existingStudent.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
-                            : existingStudent.status?.toLowerCase().includes('blocked') ? '#9ca3af'
-                            : '#dc2626',
-                        }} />
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
+            <div className="space-y-2">
+              {SHIFTS.map((shift) => {
+                const checked = selectedShifts.includes(shift)
+                return (
+                  <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
+                    style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
+                    <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                      style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
+                      {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
-                        {existingStudent.name}
-                      </p>
-                      <p className="text-[10px] mt-0.5" style={{ color: T.textMuted }}>{existingStudent.mobile_number}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <StatusBadge status={existingStudent.status} />
-                      <span className="text-[10px]" style={{ color: T.textMuted }}>Tap to view →</span>
-                    </div>
-                  </Link>
-                </div>
-              )}
+                    <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
+                  </label>
+                )
+              })}
             </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
-                <select value={gender}
-                  onChange={(e) => { setGender(e.target.value); sd({ gender: e.target.value }) }}
-                  className={inputCls + ' appearance-none'} style={inputStyle}>
-                  <option value="">Select…</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Date of Birth *</label>
-                <input type="date" value={dob}
-                  onChange={(e) => { setDob(e.target.value); sd({ dob: e.target.value }) }}
-                  max={toInputDate(new Date().toISOString())} className={inputCls} style={inputStyle} />
-              </div>
-            </div>
-
-            <div className="mb-4">
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
               <label className={labelCls} style={{ color: T.textSub }}>
-                Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
+                Final Fees *
+                <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
               </label>
-              <input type="text" value={aadhar}
-                onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 12); setAadhar(v); sd({ aadhar: v }) }}
-                placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
-            </div>
-
-            <div className="mb-4">
-              <label className={labelCls} style={{ color: T.textSub }}>Address</label>
-              <textarea value={address}
-                onChange={(e) => { setAddress(e.target.value); sd({ address: e.target.value }) }}
-                rows={2} placeholder="Full address (optional)" className={inputCls + ' resize-none'} style={inputStyle} />
-            </div>
-
-            <SectionLabel>📋 Admission Details</SectionLabel>
-
-            <div className="mb-4">
-              <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>New</div>
-            </div>
-
-            <div className="mb-4">
-              <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-              <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+              <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
                 className={inputCls} style={inputStyle} />
             </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-                <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
-                  min="1" className={inputCls} style={inputStyle} />
-              </div>
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-                <input type="number" value={seat}
-                  onChange={(e) => { setSeat(e.target.value); sd({ seat: e.target.value }) }}
-                  min="0" max="92" className={inputCls} style={inputStyle} />
-              </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+              <input type="number" value={feesSubmitted}
+                onChange={(e) => { setFeesSubmitted(e.target.value); sd({ feesSubmitted: e.target.value }) }}
+                className={inputCls} style={inputStyle} />
             </div>
+          </div>
 
-            <div className="mb-4">
-              <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
-              <div className="space-y-2">
-                {SHIFTS.map((shift) => {
-                  const checked = selectedShifts.includes(shift)
-                  return (
-                    <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
-                      style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
-                      <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                        style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
-                        {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                      </div>
-                      <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
-                    </label>
-                  )
-                })}
-              </div>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
+              <select value={mode}
+                onChange={(e) => { setMode(e.target.value); sd({ mode: e.target.value }) }}
+                className={inputCls + ' appearance-none'} style={inputStyle}>
+                <option value="Cash">Cash</option>
+                <option value="Online">Online</option>
+              </select>
             </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>
-                  Final Fees *
-                  <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
-                </label>
-                <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
-                  className={inputCls} style={inputStyle} />
-              </div>
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-                <input type="number" value={feesSubmitted}
-                  onChange={(e) => { setFeesSubmitted(e.target.value); sd({ feesSubmitted: e.target.value }) }}
-                  className={inputCls} style={inputStyle} />
-              </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
+              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
             </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-                <select value={mode}
-                  onChange={(e) => { setMode(e.target.value); sd({ mode: e.target.value }) }}
-                  className={inputCls + ' appearance-none'} style={inputStyle}>
-                  <option value="Cash">Cash</option>
-                  <option value="Online">Online</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
-                <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-              <textarea value={comment}
-                onChange={(e) => { setComment(e.target.value); sd({ comment: e.target.value }) }}
-                rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
-            </div>
-
-          </div>{/* end locked section */}
-
-          {error && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-              <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-            </div>
-          )}
+          <div className="mb-5">
+            <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
+            <textarea value={comment}
+              onChange={(e) => { setComment(e.target.value); sd({ comment: e.target.value }) }}
+              rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
+          </div>
         </div>
 
-        <div className="shrink-0 flex gap-3 p-4 pt-3"
-          style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-            style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-          <button
-            onClick={handleSubmit}
-            disabled={!photoVerified || saving || regIdLoading || !!mobileError}
-            className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-            style={{ background: T.accent, color: 'white' }}>
-            {saving
-              ? <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  Saving…
-                </span>
-              : '✓ Confirm Admission'}
-          </button>
-        </div>
-      </ModalShell>
+        {error && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
+          </div>
+        )}
+      </div>
 
-      {showAadhaarScanner && (
-        <AadhaarScannerModal
-          onClose={() => setShowAadhaarScanner(false)}
-          onExtracted={handleAadhaarExtracted}
-        />
-      )}
-    </>
+      <div className="shrink-0 flex gap-3 p-4 pt-3"
+        style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+          style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+        <button
+          onClick={handleSubmit}
+          disabled={!photoVerified || saving || regIdLoading || !!mobileError}
+          className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+          style={{ background: T.accent, color: 'white' }}>
+          {saving
+            ? <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Saving…
+              </span>
+            : '✓ Confirm Admission'}
+        </button>
+      </div>
+    </ModalShell>
   )
 }
 
@@ -1797,19 +1747,24 @@ export default function Home() {
   const router = useRouter()
   const [, startTransition] = useTransition()
 
-  const [students, setStudents] = useState<any[]>([])
-  const [search, setSearch] = useState('')
-  const [searchInput, setSearchInput] = useState('')
-  const [filter, setFilter] = useState('active')
-  const [selectedCard, setSelectedCard] = useState('active')
-  const [loading, setLoading] = useState(true)
-  const [userName, setUserName] = useState('')
-  const [role, setRole] = useState('')
-  const [bulkMode, setBulkMode] = useState(false)
+  const [students, setStudents]             = useState<any[]>([])
+  const [search, setSearch]                 = useState('')
+  const [searchInput, setSearchInput]       = useState('')
+  const [filter, setFilter]                 = useState('active')
+  const [selectedCard, setSelectedCard]     = useState('active')
+  const [loading, setLoading]               = useState(true)
+  const [userName, setUserName]             = useState('')
+  const [role, setRole]                     = useState('')
+  const [bulkMode, setBulkMode]             = useState(false)
   const [selectedMobiles, setSelectedMobiles] = useState<Set<string>>(new Set())
-  const [bulkLoading, setBulkLoading] = useState(false)
-  const [renewStudent, setRenewStudent] = useState<any | null>(null)
+  const [bulkLoading, setBulkLoading]       = useState(false)
+  const [renewStudent, setRenewStudent]     = useState<any | null>(null)
   const [showNewAdmission, setShowNewAdmission] = useState(false)
+
+  // ── Aadhaar scanner — lifted to page root so z-index is never trapped ────────
+  // aadhaarCallback holds the function that NewAdmissionPopup wants called with the extracted data.
+  // When non-null, AadhaarScannerModal is shown.
+  const [aadhaarCallback, setAadhaarCallback] = useState<((data: Partial<AadhaarData>) => void) | null>(null)
 
   const [confirmModal, setConfirmModal] = useState<{
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
@@ -1817,7 +1772,6 @@ export default function Home() {
 
   useEffect(() => {
     let profileFetched = false
-
     const fetchProfile = async (userId: string) => {
       if (profileFetched) return
       profileFetched = true
@@ -1892,12 +1846,12 @@ export default function Home() {
   }), [students, search, filter])
 
   const stats = useMemo(() => ({
-    total: students.length,
-    active: students.filter(s => s.status?.includes('Active')).length,
+    total:   students.length,
+    active:  students.filter(s => s.status?.includes('Active')).length,
     expired: students.filter(s => s.status?.includes('Expired')).length,
-    due: students.filter(s => s.status?.includes('Due')).length,
+    due:     students.filter(s => s.status?.includes('Due')).length,
     blocked: students.filter(s => s.status?.toLowerCase().includes('blocked')).length,
-    frozen: students.filter(s => s.status?.toLowerCase().includes('freeze')).length,
+    frozen:  students.filter(s => s.status?.toLowerCase().includes('freeze')).length,
   }), [students])
 
   const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login') }
@@ -1953,9 +1907,9 @@ export default function Home() {
     })
   }
 
-  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canSeeLedger = role === 'admin' || role === 'partner'
-  const showBulkBlock = isPrivileged && filter === 'expired'
+  const isPrivileged  = role === 'admin' || role === 'manager' || role === 'partner'
+  const canSeeLedger  = role === 'admin' || role === 'partner'
+  const showBulkBlock   = isPrivileged && filter === 'expired'
   const showBulkUnblock = isPrivileged && filter === 'blocked'
 
   const CARDS = [
@@ -2151,11 +2105,15 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ── MODALS — rendered at root, stacking order: 50 → 60 → 80 ── */}
+
       {showNewAdmission && (
         <NewAdmissionPopup
           userName={userName}
           onClose={() => setShowNewAdmission(false)}
-          onSuccess={() => { cachedStudents = null; fetchStudents(true) }} />
+          onSuccess={() => { cachedStudents = null; fetchStudents(true) }}
+          onOpenAadhaarScanner={(cb) => setAadhaarCallback(() => cb)}
+        />
       )}
 
       {renewStudent && (
@@ -2173,6 +2131,17 @@ export default function Home() {
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
           onCancel={() => setConfirmModal(null)} />
+      )}
+
+      {/* AadhaarScannerModal is ALWAYS at root — z-[80] beats everything above */}
+      {aadhaarCallback && (
+        <AadhaarScannerModal
+          onClose={() => setAadhaarCallback(null)}
+          onExtracted={(data) => {
+            aadhaarCallback(data)
+            setAadhaarCallback(null)
+          }}
+        />
       )}
     </>
   )
