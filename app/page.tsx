@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo, useTransition, memo, useCallback, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useMemo, useTransition, memo, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -11,32 +11,6 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyxI48i0cFx3c4-
 const RENEW_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSc5KbtfqUpgRuohNyQdhVb-xahCRVTBizCXPobr0vyErzvX_Q/viewform'
 const PHOTO_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSfq6Ajw4dxXw1PiwLR_Bu6GhNccUXSRTSo6yQgj_2o6SpZDkw/viewform'
 const PHOTO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX-eQ5-UcKiDY1Aa15KnXG52gEK33tkIVAXaWM8lN5CFxdnMyZXqVng0rfnfWYh-vG/exec'
-const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ''
-
-const callGemini = async (body: object): Promise<string> => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}`
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const json = await response.json()
-
-    if (response.status === 503 || response.status === 429) {
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, attempt * 2000))
-        continue
-      }
-      throw new Error('Gemini is busy right now. Please try again in a moment.')
-    }
-
-    if (!response.ok) throw new Error(json?.error?.message || `HTTP ${response.status}`)
-    return json?.candidates?.[0]?.content?.parts?.[0]?.text || 'No response received.'
-  }
-  throw new Error('Gemini is busy right now. Please try again in a moment.')
-}
 
 const T = {
   bg: '#faf8f5', surface: '#ffffff',
@@ -240,291 +214,6 @@ function ModalShell({ onBackdropClick, children }: {
         {children}
       </div>
     </div>
-  )
-}
-
-// ─── AI CHAT WIDGET ───────────────────────────────────────────────────────────
-interface ChatMessage {
-  role: 'user' | 'ai'
-  text: string
-  loading?: boolean
-}
-
-let cachedAdmissions: any[] | null = null
-
-function ChatWidget({ open, setOpen }: { open: boolean; setOpen: (v: boolean | ((o: boolean) => boolean)) => void }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'ai', text: '👋 Hi! Ask me anything about admission data — e.g. "Show all active students" or "Students with fees less than 1500 and 3 months".' }
-  ])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [dataLoading, setDataLoading] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 100)
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [open, messages])
-
-  const fetchAdmissionData = async (): Promise<any[]> => {
-    if (cachedAdmissions && cachedAdmissions.length > 0) return cachedAdmissions
-    setDataLoading(true)
-    const { data, error } = await supabase
-      .from('v_student_summary')
-      .select('*')
-    setDataLoading(false)
-    console.log('Admission data fetch:', { count: data?.length, error })
-    if (error || !data) {
-      console.error('Failed to fetch admission data:', error)
-      return []
-    }
-    cachedAdmissions = data
-    return data
-  }
-
-  const askGemini = async (question: string) => {
-    if (!question.trim()) return
-    setLoading(true)
-
-    const userMsg: ChatMessage = { role: 'user', text: question }
-    const aiPlaceholder: ChatMessage = { role: 'ai', text: '', loading: true }
-    setMessages(prev => [...prev, userMsg, aiPlaceholder])
-    setInput('')
-
-    try {
-      const data = await fetchAdmissionData()
-
-      const systemPrompt = `You are an AI assistant for Knowledge Hub Library. You have access to the library's student records.
-
-The data below is from v_student_summary. Each row is one student with these columns:
-- name, mobile_number, status, total_due, total_admissions, image_url, latest_expiry, latest_fees, latest_months, latest_seat, latest_shift
-
-IMPORTANT RULES:
-- For COUNT queries: count EVERY matching record in the data, do not estimate
-- For LIST queries: show name, mobile, status only — keep it brief
-- Status values: Active, Expired, Blocked, Freezed, Active+Due, Expired+Due, Blocked+Due
-- "Active students" means status includes "Active" (so both "Active" AND "Active+Due" count)
-- For fee queries format with ₹ symbol
-- Format dates as "15 Jan 2025"
-- Keep responses concise — for lists over 10 students, show first 10 and say "and X more"
-
-STUDENT DATA (${data.length} records):
-${JSON.stringify(data, null, 0)}`
-
-      const aiText = await callGemini({
-        contents: [{ parts: [{ text: `${systemPrompt}\n\nUser question: ${question}` }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 3000 }
-      })
-
-      setMessages(prev => prev.map((m, i) =>
-        i === prev.length - 1 ? { role: 'ai', text: aiText, loading: false } : m
-      ))
-    } catch (err: any) {
-      console.error('AI chat error:', err)
-      setMessages(prev => prev.map((m, i) =>
-        i === prev.length - 1 ? { role: 'ai', text: `⚠️ ${err?.message || 'Something went wrong. Please try again.'}`, loading: false } : m
-      ))
-    }
-    setLoading(false)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && !loading) {
-      e.preventDefault()
-      askGemini(input)
-    }
-  }
-
-  const formatAiText = (text: string) => {
-    return text.split('\n').map((line, i) => {
-      if (line.startsWith('### ')) {
-        return <p key={i} className="font-bold text-sm mb-1 mt-2" style={{ color: T.text }}>{line.slice(4)}</p>
-      }
-      if (line.startsWith('## ')) {
-        return <p key={i} className="font-bold text-sm mb-1 mt-2" style={{ color: T.text }}>{line.slice(3)}</p>
-      }
-      if (line.startsWith('**') && line.endsWith('**')) {
-        return <p key={i} className="font-semibold mb-1" style={{ color: T.text }}>{line.slice(2, -2)}</p>
-      }
-      if (line.startsWith('- ') || line.startsWith('• ') || line.startsWith('* ')) {
-        return <p key={i} className="pl-3 mb-0.5" style={{ color: T.text }}>• {line.slice(2)}</p>
-      }
-      if (line.startsWith('| ')) {
-        const cells = line.split('|').filter(c => c.trim() && !c.trim().match(/^[-:]+$/))
-        if (cells.length === 0) return null
-        return (
-          <div key={i} className="flex gap-2 text-xs py-0.5 border-b" style={{ borderColor: T.border }}>
-            {cells.map((cell, j) => (
-              <span key={j} className="flex-1 truncate" style={{ color: T.text }}>{cell.trim()}</span>
-            ))}
-          </div>
-        )
-      }
-      if (line.trim() === '' || line.trim() === '---') return <div key={i} className="h-2" />
-      if (line.includes('**')) {
-        const parts = line.split(/\*\*(.*?)\*\*/g)
-        return (
-          <p key={i} className="mb-0.5 leading-relaxed" style={{ color: T.text }}>
-            {parts.map((part, j) => j % 2 === 1 ? <strong key={j}>{part}</strong> : part)}
-          </p>
-        )
-      }
-      return <p key={i} className="mb-0.5 leading-relaxed" style={{ color: T.text }}>{line}</p>
-    })
-  }
-
-  return (
-    <>
-      {/* Floating Button */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="fixed bottom-6 right-6 z-[100] w-14 h-14 rounded-2xl shadow-2xl flex items-center justify-center transition-all duration-200"
-        style={{
-          background: open ? T.text : T.accent,
-          boxShadow: `0 4px 24px ${T.accent}60`,
-          transform: open ? 'scale(0.95)' : 'scale(1)',
-        }}
-        title="AI Assistant"
-      >
-        {open ? (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        ) : (
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-        )}
-      </button>
-
-      {/* Chat Panel */}
-      {open && (
-        <div
-          className="fixed bottom-24 right-4 sm:right-6 z-[99] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
-          style={{
-            width: 'min(400px, calc(100vw - 32px))',
-            height: 'min(560px, calc(100dvh - 120px))',
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-          }}
-        >
-          {/* Header */}
-          <div className="shrink-0 px-4 py-3 flex items-center gap-3"
-            style={{ background: T.accent, borderBottom: `1px solid ${T.accentBorder}` }}>
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
-              style={{ background: 'rgba(255,255,255,0.2)' }}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-bold text-white">AI Assistant</p>
-              <p className="text-[10px] text-white/70">Powered by Gemini · Student data</p>
-            </div>
-            {dataLoading && (
-              <div className="flex items-center gap-1.5">
-                <svg className="animate-spin w-3.5 h-3.5 text-white/70" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                <span className="text-[10px] text-white/70">Loading data…</span>
-              </div>
-            )}
-          </div>
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3" style={{ background: T.bg }}>
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {msg.role === 'ai' && (
-                  <div className="w-6 h-6 rounded-lg shrink-0 mr-2 mt-0.5 flex items-center justify-center"
-                    style={{ background: T.accent }}>
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                    </svg>
-                  </div>
-                )}
-                <div
-                  className="max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs"
-                  style={msg.role === 'user'
-                    ? { background: T.accent, color: 'white', borderBottomRightRadius: 6 }
-                    : { background: T.surface, color: T.text, border: `1px solid ${T.border}`, borderBottomLeftRadius: 6 }
-                  }
-                >
-                  {msg.loading ? (
-                    <div className="flex items-center gap-1.5 py-0.5">
-                      {[0, 1, 2].map(j => (
-                        <div key={j} className="w-1.5 h-1.5 rounded-full animate-bounce"
-                          style={{ background: T.accent, animationDelay: `${j * 0.15}s` }} />
-                      ))}
-                    </div>
-                  ) : msg.role === 'ai' ? (
-                    <div className="leading-relaxed">{formatAiText(msg.text)}</div>
-                  ) : (
-                    <p className="leading-relaxed">{msg.text}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Quick suggestions */}
-          {messages.length === 1 && (
-            <div className="shrink-0 px-3 py-2 flex gap-2 overflow-x-auto"
-              style={{ background: T.bg, borderTop: `1px solid ${T.border}` }}>
-              {[
-                'Active students count',
-                'Students with due fees',
-                'Show expired students',
-                'Online payment students',
-              ].map(q => (
-                <button key={q} onClick={() => askGemini(q)}
-                  className="shrink-0 px-3 py-1.5 rounded-full text-[10px] font-medium whitespace-nowrap"
-                  style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
-                  {q}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Input */}
-          <div className="shrink-0 flex gap-2 p-3"
-            style={{ borderTop: `1px solid ${T.border}`, background: T.surface }}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about students, fees, seats…"
-              disabled={loading}
-              className="flex-1 px-3 py-2 rounded-xl text-xs focus:outline-none disabled:opacity-50"
-              style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '14px' }}
-            />
-            <button
-              onClick={() => askGemini(input)}
-              disabled={loading || !input.trim()}
-              className="w-9 h-9 rounded-xl flex items-center justify-center disabled:opacity-40 transition-all"
-              style={{ background: T.accent, color: 'white' }}>
-              {loading ? (
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.269 20.876L5.999 12zm0 0h7.5" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-    </>
   )
 }
 
@@ -794,7 +483,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
   const [photoUrl, setPhotoUrl] = useState('')
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState('')
   const [photoPhase, setPhotoPhase] = useState<'idle' | 'countdown' | 'polling' | 'done' | 'failed'>('idle')
-  const [photoCountdown, setPhotoCountdown] = useState(40)
+  const [photoCountdown, setPhotoCountdown] = useState(30)
   const [pollCountdown, setPollCountdown] = useState(5)
   const [photoError, setPhotoError] = useState('')
   const pollingRef = useRef<{ stop: () => void } | null>(null)
@@ -841,30 +530,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const sd = (patch: Record<string, any>) => saveDraft(patch)
 
-  const startVerify = () => {
-    if (!regId || photoPhase === 'countdown' || photoPhase === 'polling') return
-    setPhotoError('')
-    setPhotoVerified(false)
-    setPhotoUrl('')
-    setPhotoPreviewUrl('')
-    setPhotoPhase('countdown')
-    setPhotoCountdown(40)
-
-    const stopped = { value: false }
-    pollingRef.current = { stop: () => { stopped.value = true } }
-
-    let remaining = 40
-    const countdownTimer = setInterval(() => {
-      if (stopped.value) { clearInterval(countdownTimer); return }
-      remaining -= 1
-      setPhotoCountdown(remaining)
-      if (remaining <= 0) {
-        clearInterval(countdownTimer)
-        if (!stopped.value) beginPolling(stopped)
-      }
-    }, 1000)
-  }
-
+  // 1️⃣ Single fetch — used by both polling and instant verify
   const doSingleCheck = async (): Promise<boolean> => {
     try {
       const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
@@ -881,16 +547,17 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     return false
   }
 
+  // 2️⃣ Polling loop — called after the 30s countdown ends
   const beginPolling = (stopped: { value: boolean }) => {
     setPhotoPhase('polling')
     const startedAt = Date.now()
-    const MAX_MS = 4 * 60 * 1000
+    const MAX_MS = 3 * 60 * 1000
 
     const runCycle = async () => {
       if (stopped.value) return
       if (Date.now() - startedAt > MAX_MS) {
         setPhotoPhase('failed')
-        setPhotoError('Photo not found after 4 minutes. Please re-upload and try again.')
+        setPhotoError('Photo not found after 3 minutes. Please re-upload and try again.')
         return
       }
       const found = await doSingleCheck()
@@ -909,9 +576,47 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     runCycle()
   }
 
+  // 3️⃣ Auto-flow — triggered by "Open Upload Form": starts 30s countdown then polling
+  const startAutoFlow = () => {
+    if (!regId || photoPhase === 'countdown' || photoPhase === 'polling') return
+    setPhotoError('')
+    setPhotoVerified(false)
+    setPhotoUrl('')
+    setPhotoPreviewUrl('')
+    setPhotoPhase('countdown')
+    setPhotoCountdown(30)
+
+    const stopped = { value: false }
+    pollingRef.current = { stop: () => { stopped.value = true } }
+
+    let remaining = 30
+    const countdownTimer = setInterval(() => {
+      if (stopped.value) { clearInterval(countdownTimer); return }
+      remaining -= 1
+      setPhotoCountdown(remaining)
+      if (remaining <= 0) {
+        clearInterval(countdownTimer)
+        if (!stopped.value) beginPolling(stopped)
+      }
+    }, 1000)
+  }
+
+  // 4️⃣ Instant verify — manual button, no timer, single check only
+  const [instantChecking, setInstantChecking] = useState(false)
+  const instantVerify = async () => {
+    if (!regId || instantChecking) return
+    setInstantChecking(true)
+    setPhotoError('')
+    const found = await doSingleCheck()
+    if (!found) setPhotoError('Photo not found. Please make sure you submitted the form and try again.')
+    setInstantChecking(false)
+  }
+
+  // 5️⃣ Opens the upload form tab and simultaneously kicks off the auto-flow
   const openPhotoForm = () => {
     if (!regId) return
     window.open(`${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`, '_blank')
+    startAutoFlow()
   }
 
   const handleMobileChange = async (val: string) => {
@@ -1067,7 +772,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
           </div>
           <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: T.accentBorder }}>
             <div className="h-full rounded-full transition-all duration-1000"
-              style={{ width: `${((40 - photoCountdown) / 40) * 100}%`, background: T.accent }} />
+              style={{ width: `${((30 - photoCountdown) / 30) * 100}%`, background: T.accent }} />
           </div>
         </div>
       )
@@ -1103,11 +808,11 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
       }}>
         <p className="text-xs mb-3" style={{ color: T.textSub }}>
           {photoPhase === 'failed'
-            ? 'Photo not found. Please re-upload via the form and verify again.'
-            : 'Open the upload form in a new tab, upload the photo, then click Verify Photo.'}
+            ? 'Photo not found after 3 minutes. Re-upload via the form or verify manually if you already uploaded.'
+            : 'Open the upload form — the timer will start automatically once you click it.'}
         </p>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={openPhotoForm} disabled={regIdLoading || !regId}
+          <button onClick={openPhotoForm} disabled={regIdLoading || !regId || photoPhase === 'countdown' || photoPhase === 'polling'}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
             style={{ background: T.accent, color: 'white' }}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1115,13 +820,19 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
             </svg>
             Open Upload Form ↗
           </button>
-          <button onClick={startVerify} disabled={regIdLoading || !regId}
+          <button onClick={instantVerify} disabled={regIdLoading || !regId || instantChecking}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
             style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Verify Photo
+            {instantChecking
+              ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            }
+            {instantChecking ? 'Checking…' : 'Already Uploaded? Verify'}
           </button>
         </div>
         {photoError && <p className="text-xs mt-2.5 font-medium" style={{ color: '#dc2626' }}>{photoError}</p>}
@@ -1357,7 +1068,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
         {!photoVerified && photoPhase === 'idle' && (
           <div className="mb-2 px-4 py-2.5 rounded-xl text-xs"
             style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
-            📸 Upload and verify the student's photo above to enable submission.
+            📸 Click "Open Upload Form" above — the timer starts automatically.
           </div>
         )}
       </div>
@@ -1404,7 +1115,6 @@ export default function Home() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [renewStudent, setRenewStudent] = useState<any | null>(null)
   const [showNewAdmission, setShowNewAdmission] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
 
   const [confirmModal, setConfirmModal] = useState<{
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
@@ -1444,10 +1154,15 @@ export default function Home() {
     return () => clearTimeout(t)
   }, [searchInput])
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem('dashboard_filter') || 'active'
-    setFilter(saved)
-    setSelectedCard(saved)
+  // Restore persisted state client-side before paint — avoids hydration mismatch
+  useLayoutEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('dashboard_filter') || 'active'
+      setFilter(saved)
+      setSelectedCard(saved)
+      const draft = sessionStorage.getItem(DRAFT_KEY)
+      if (draft && Object.keys(JSON.parse(draft)).length > 0) setShowNewAdmission(true)
+    } catch {}
   }, [])
 
   useEffect(() => {
@@ -1598,14 +1313,6 @@ export default function Home() {
                     style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
                     💸 Expenses
                   </Link>
-                  {role === 'admin' && (
-                    <button
-                      onClick={() => setChatOpen(o => !o)}
-                      className="px-3 py-2 rounded-xl text-xs font-medium"
-                      style={{ background: chatOpen ? T.accent : T.surface, border: `1px solid ${chatOpen ? T.accent : T.border}`, color: chatOpen ? 'white' : T.textSub }}>
-                      🤖 AI Chat
-                    </button>
-                  )}
                   <NewAdmissionButton onClick={() => setShowNewAdmission(true)} />
                 </>
               )}
@@ -1749,10 +1456,6 @@ export default function Home() {
           </div>
         </div>
       </div>
-
-      {role === 'admin' && (
-        <ChatWidget open={chatOpen} setOpen={setChatOpen} />
-      )}
 
       {showNewAdmission && (
         <NewAdmissionPopup
