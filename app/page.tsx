@@ -159,7 +159,18 @@ const StudentCard = memo(({
         </div>
         <div className="flex-1 min-w-0 pr-6">
           <p className="font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif", fontSize: '15px' }}>{s.name}</p>
-          <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>{s.mobile_number}</p>
+          {/* ── CHANGE 1: clickable phone — using button to avoid nested <a> inside <Link> ── */}
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              window.location.href = `tel:${s.mobile_number}`
+            }}
+            className="text-xs mt-0.5 block text-left"
+            style={{ color: T.accent, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            {s.mobile_number}
+          </button>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusBadge status={s.status} />
             {s.total_due > 0 && (
@@ -228,13 +239,16 @@ function ModalShell({ onBackdropClick, children }: {
 }
 
 // ─── RENEW POPUP ──────────────────────────────────────────────────────────────
-function RenewPopup({ student, userName, onClose, onSuccess }: {
-  student: any; userName: string; onClose: () => void; onSuccess: () => void
+// ── CHANGE 2: added role prop + warning state + admin soft bypass ──
+function RenewPopup({ student, userName, role, onClose, onSuccess }: {
+  student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
+  const isAdmin = role === 'admin'
   const [saving, setSaving] = useState(false)
   const [regId, setRegId] = useState('')
   const [regIdLoading, setRegIdLoading] = useState(true)
   const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
 
   const latestExpiry = toInputDate(student.latest_expiry || '')
   const [startDate, setStartDate] = useState(latestExpiry)
@@ -291,13 +305,25 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
   }
 
   const handleSubmit = async () => {
+    setWarning('')
     if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
       setError('Please fill all required fields'); return
     }
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
-    if (isDateOlderThan20Days(startDate)) { setError('Start date cannot be older than 20 days'); return }
-    if (parseFloat(finalFees) < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
+
+    // Start date check — admin gets warning, others blocked
+    if (isDateOlderThan20Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
+      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    }
+
+    // Fees check — admin gets warning, others blocked
+    if (parseFloat(finalFees) < minFees) {
+      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
+      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
+    }
+
     if (!regId) { setError('Register ID not loaded'); return }
     setSaving(true); setError('')
 
@@ -422,6 +448,11 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
           <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
           <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
         </div>
+        {warning && (
+          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
+            <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
+          </div>
+        )}
         {error && (
           <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
             <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
@@ -481,9 +512,11 @@ function clearDraft() {
 }
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-function NewAdmissionPopup({ userName, onClose, onSuccess }: {
-  userName: string; onClose: () => void; onSuccess: () => void
+// ── CHANGE 3: added role prop + warning state + admin soft bypass ──
+function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
+  userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
+  const isAdmin = role === 'admin'
   const draft = loadDraft()
 
   const [regId, setRegId] = useState('')
@@ -523,6 +556,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
 
   const minFees = Math.round(500 * parseFloat(months || '1'))
 
@@ -674,6 +708,7 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
   const handleSubmit = async () => {
     setError('')
+    setWarning('')
     if (!name.trim() || name.trim().length < 2)            { setError('Name must be at least 2 characters.'); return }
     if (mobile.length !== 10)                               { setError('Mobile number must be exactly 10 digits.'); return }
     if (mobileError === 'exists')                           { setError('This mobile is already registered. View the student card above.'); return }
@@ -682,14 +717,27 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
     if (new Date(dob) >= new Date())                        { setError('Date of birth must be in the past.'); return }
     if (aadhar && aadhar.replace(/\D/g, '').length !== 12) { setError('Aadhar number must be 12 digits.'); return }
     if (!startDate)                                         { setError('Start date is required.'); return }
-    if (isDateOlderThan20Days(startDate))                   { setError('Start date cannot be older than 20 days.'); return }
+
+    // Start date check — admin gets warning, others blocked
+    if (isDateOlderThan20Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be older than 20 days.'); return }
+      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    }
+
     if (!months || parseFloat(months) < 1)                  { setError('Months must be at least 1.'); return }
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92)     { setError('Seat must be between 0 and 92.'); return }
     if (selectedShifts.length === 0)                        { setError('Please select at least one shift.'); return }
-    if (!finalFees || parseFloat(finalFees) < minFees)      { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
+
+    // Fees check — admin gets warning, others blocked
+    if (!finalFees || parseFloat(finalFees) < minFees) {
+      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
+      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
+    }
+
     if (!feesSubmitted)                                     { setError('Fees Submitted is required.'); return }
     if (!regId)                                             { setError('Register ID not loaded yet. Please wait.'); return }
+    // Photo verification is always required — no admin bypass
     if (!photoVerified || !photoUrl)                        { setError('Please verify the student photo before submitting.'); return }
 
     setSaving(true)
@@ -1100,6 +1148,11 @@ function NewAdmissionPopup({ userName, onClose, onSuccess }: {
 
         </div>{/* end locked section */}
 
+        {warning && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
+            <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
+          </div>
+        )}
         {error && (
           <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
             <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
@@ -1139,7 +1192,6 @@ export default function Home() {
 
   const scrollRestoredRef = useRef(false)
 
-  // ── State — lazy initialisers read sessionStorage directly (safe: no SSR) ──
   const [students, setStudents] = useState<any[]>([])
   const [search, setSearch] = useState(() => { try { return sessionStorage.getItem('dashboard_search') || '' } catch { return '' } })
   const [searchInput, setSearchInput] = useState(() => { try { return sessionStorage.getItem('dashboard_search') || '' } catch { return '' } })
@@ -1160,9 +1212,6 @@ export default function Home() {
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
   } | null>(null)
 
-
-
-  // ── Auth + profile fetch ────────────────────────────────────────────────────
   useEffect(() => {
     let profileFetched = false
 
@@ -1197,28 +1246,18 @@ export default function Home() {
     return () => clearTimeout(t)
   }, [searchInput])
 
-  useEffect(() => {
-    sessionStorage.setItem('dashboard_filter', filter)
-  }, [filter])
+  useEffect(() => { sessionStorage.setItem('dashboard_filter', filter) }, [filter])
+  useEffect(() => { sessionStorage.setItem('dashboard_search', searchInput) }, [searchInput])
 
   useEffect(() => {
-    sessionStorage.setItem('dashboard_search', searchInput)
-  }, [searchInput])
-
-  useEffect(() => {
-    const handleScroll = () => {
-      sessionStorage.setItem('dashboard_scroll', String(window.scrollY))
-    }
+    const handleScroll = () => { sessionStorage.setItem('dashboard_scroll', String(window.scrollY)) }
     window.addEventListener('scroll', handleScroll, { passive: true })
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        cachedStudents = null
-        fetchStudents(true)
-      }
+      if (document.visibilityState === 'visible') { cachedStudents = null; fetchStudents(true) }
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
@@ -1509,9 +1548,11 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ── CHANGE 4: role passed to both popups ── */}
       {showNewAdmission && (
         <NewAdmissionPopup
           userName={userName}
+          role={role}
           onClose={() => setShowNewAdmission(false)}
           onSuccess={() => { cachedStudents = null; fetchStudents(true) }} />
       )}
@@ -1520,6 +1561,7 @@ export default function Home() {
         <RenewPopup
           student={renewStudent}
           userName={userName}
+          role={role}
           onClose={() => setRenewStudent(null)}
           onSuccess={() => { cachedStudents = null; fetchStudents(true) }} />
       )}
