@@ -160,20 +160,27 @@ const StudentCard = memo(({
         <div className="flex-1 min-w-0 pr-6">
           <p className="font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif", fontSize: '15px' }}>{s.name}</p>
 
-          {/* ── FIX: plain text number + proper <a href="tel:"> Call pill — works on iOS & Android ── */}
+          {/* ── FIX: plain text + button with onTouchStart/End for reliable iOS call ── */}
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs" style={{ color: T.textSub }}>
               {s.mobile_number}
             </span>
-            <a
-              href={`tel:${s.mobile_number}`}
-              onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
-              onTouchEnd={(e) => { e.stopPropagation(); window.location.href = `tel:${s.mobile_number}` }}
+            <button
+              onTouchStart={(e) => { e.stopPropagation() }}
+              onTouchEnd={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                window.location.href = `tel:${s.mobile_number}`
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                window.location.href = `tel:${s.mobile_number}`
+              }}
               className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
-              style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}
+              style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}
             >
               📞 Call
-            </a>
+            </button>
           </div>
 
           <div className="mt-2 flex items-center gap-2 flex-wrap">
@@ -200,19 +207,10 @@ const StudentCard = memo(({
     </>
   )
 
-  const router = useRouter()
-
   const baseStyle: React.CSSProperties = {
     background: selected ? T.accentLight : T.surface,
     border: `1px solid ${selected ? T.accentBorder : T.border}`,
     boxShadow: selected ? `0 0 0 2px ${T.accentBorder}` : '0 1px 3px rgba(0,0,0,0.06)',
-  }
-
-  const handleCardClick = (e: React.MouseEvent) => {
-    // Don't navigate if clicking the Call link or Renew button
-    const target = e.target as HTMLElement
-    if (target.closest('a') || target.closest('button')) return
-    router.push(`/student/${s.mobile_number}`)
   }
 
   if (selectable) {
@@ -222,12 +220,8 @@ const StudentCard = memo(({
     )
   }
   return (
-    <div
-      className="relative rounded-2xl overflow-hidden cursor-pointer hover:bg-orange-50/40 transition-colors"
-      style={baseStyle}
-      onClick={handleCardClick}
-    >
-      {innerContent}
+    <div className="relative rounded-2xl overflow-hidden" style={baseStyle}>
+      <Link href={`/student/${s.mobile_number}`} className="block hover:bg-orange-50/40 transition-colors">{innerContent}</Link>
     </div>
   )
 })
