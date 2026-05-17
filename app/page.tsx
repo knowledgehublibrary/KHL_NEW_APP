@@ -159,18 +159,22 @@ const StudentCard = memo(({
         </div>
         <div className="flex-1 min-w-0 pr-6">
           <p className="font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif", fontSize: '15px' }}>{s.name}</p>
-          {/* ── CHANGE 1: clickable phone — using button to avoid nested <a> inside <Link> ── */}
-          <button
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              window.location.href = `tel:${s.mobile_number}`
-            }}
-            className="text-xs mt-0.5 block text-left"
-            style={{ color: T.accent, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-          >
-            {s.mobile_number}
-          </button>
+
+          {/* ── FIX: plain text number + proper <a href="tel:"> Call pill — works on iOS & Android ── */}
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-xs" style={{ color: T.textSub }}>
+              {s.mobile_number}
+            </span>
+            <a
+              href={`tel:${s.mobile_number}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+              style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}
+            >
+              📞 Call
+            </a>
+          </div>
+
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusBadge status={s.status} />
             {s.total_due > 0 && (
@@ -195,10 +199,19 @@ const StudentCard = memo(({
     </>
   )
 
+  const router = useRouter()
+
   const baseStyle: React.CSSProperties = {
     background: selected ? T.accentLight : T.surface,
     border: `1px solid ${selected ? T.accentBorder : T.border}`,
     boxShadow: selected ? `0 0 0 2px ${T.accentBorder}` : '0 1px 3px rgba(0,0,0,0.06)',
+  }
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking the Call link or Renew button
+    const target = e.target as HTMLElement
+    if (target.closest('a') || target.closest('button')) return
+    router.push(`/student/${s.mobile_number}`)
   }
 
   if (selectable) {
@@ -208,8 +221,12 @@ const StudentCard = memo(({
     )
   }
   return (
-    <div className="relative rounded-2xl overflow-hidden" style={baseStyle}>
-      <Link href={`/student/${s.mobile_number}`} className="block hover:bg-orange-50/40 transition-colors">{innerContent}</Link>
+    <div
+      className="relative rounded-2xl overflow-hidden cursor-pointer hover:bg-orange-50/40 transition-colors"
+      style={baseStyle}
+      onClick={handleCardClick}
+    >
+      {innerContent}
     </div>
   )
 })
@@ -239,7 +256,6 @@ function ModalShell({ onBackdropClick, children }: {
 }
 
 // ─── RENEW POPUP ──────────────────────────────────────────────────────────────
-// ── CHANGE 2: added role prop + warning state + admin soft bypass ──
 function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -312,13 +328,11 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
 
-    // Start date check — admin gets warning, others blocked
     if (isDateOlderThan20Days(startDate)) {
       if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
       else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
     }
 
-    // Fees check — admin gets warning, others blocked
     if (parseFloat(finalFees) < minFees) {
       if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
       else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
@@ -512,7 +526,6 @@ function clearDraft() {
 }
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-// ── CHANGE 3: added role prop + warning state + admin soft bypass ──
 function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -560,7 +573,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
   const minFees = Math.round(500 * parseFloat(months || '1'))
 
-  // Fields below photo locked until verified
   const fieldsLocked = !photoVerified
 
   useEffect(() => {
@@ -581,7 +593,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
   const sd = (patch: Record<string, any>) => saveDraft(patch)
 
-  // ── Photo polling logic ────────────────────────────────────────────────────
   const doSingleCheck = async (): Promise<boolean> => {
     try {
       const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
@@ -649,7 +660,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     startAutoFlow()
   }
 
-  // ── Name: auto title-case on blur ──────────────────────────────────────────
   const handleNameBlur = () => {
     if (!name.trim()) return
     const formatted = toTitleCase(name)
@@ -657,7 +667,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     sd({ name: formatted })
   }
 
-  // ── Mobile lookup ──────────────────────────────────────────────────────────
   const handleMobileChange = async (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 10)
     setMobile(digits); sd({ mobile: digits }); setMobileError(''); setExistingStudent(null)
@@ -718,7 +727,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     if (aadhar && aadhar.replace(/\D/g, '').length !== 12) { setError('Aadhar number must be 12 digits.'); return }
     if (!startDate)                                         { setError('Start date is required.'); return }
 
-    // Start date check — admin gets warning, others blocked
     if (isDateOlderThan20Days(startDate)) {
       if (!isAdmin) { setError('Start date cannot be older than 20 days.'); return }
       else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
@@ -729,7 +737,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92)     { setError('Seat must be between 0 and 92.'); return }
     if (selectedShifts.length === 0)                        { setError('Please select at least one shift.'); return }
 
-    // Fees check — admin gets warning, others blocked
     if (!finalFees || parseFloat(finalFees) < minFees) {
       if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
       else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
@@ -737,7 +744,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
     if (!feesSubmitted)                                     { setError('Fees Submitted is required.'); return }
     if (!regId)                                             { setError('Register ID not loaded yet. Please wait.'); return }
-    // Photo verification is always required — no admin bypass
     if (!photoVerified || !photoUrl)                        { setError('Please verify the student photo before submitting.'); return }
 
     setSaving(true)
@@ -770,7 +776,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
-  // ── Photo section UI ───────────────────────────────────────────────────────
   const PhotoSection = () => {
     if (photoVerified) {
       return (
@@ -786,9 +791,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             <div className="flex-1">
               <p className="text-xs font-semibold" style={{ color: '#166534' }}>✓ Photo verified</p>
               <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>Linked to Register ID {regId}</p>
-              <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>
-                ✅ All fields are now unlocked
-              </p>
+              <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✅ All fields are now unlocked</p>
             </div>
             <button
               onClick={() => {
@@ -898,7 +901,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
       <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6"
         style={{ WebkitOverflowScrolling: 'touch' as any }}>
 
-        {/* Title */}
         <div className="flex items-start justify-between mb-5">
           <div>
             <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
@@ -907,7 +909,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
         </div>
 
-        {/* Draft restored banner */}
         {Object.keys(draft).length > 0 && (
           <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
             style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
@@ -919,12 +920,10 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           </div>
         )}
 
-        {/* Timestamp */}
         <div className="mb-3 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
           🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
         </div>
 
-        {/* Register ID */}
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
           <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
@@ -934,11 +933,9 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           </div>
         </div>
 
-        {/* ── PHOTO FIRST ───────────────────────────────────────────────────── */}
         <SectionLabel>📸 Photo Upload — Complete First</SectionLabel>
         <PhotoSection />
 
-        {/* Lock hint when photo not yet verified */}
         {fieldsLocked && (
           <div className="mt-3 mb-1 px-4 py-3 rounded-xl text-center text-xs font-medium"
             style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
@@ -946,7 +943,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           </div>
         )}
 
-        {/* ── ALL OTHER FIELDS — locked until photo verified ─────────────────── */}
         <div style={{
           opacity: fieldsLocked ? 0.35 : 1,
           pointerEvents: fieldsLocked ? 'none' : 'auto',
@@ -955,7 +951,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
           <SectionLabel>👤 Personal Details</SectionLabel>
 
-          {/* Name */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
             <input
@@ -974,7 +969,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             )}
           </div>
 
-          {/* Mobile */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
             <input type="tel" value={mobile} onChange={(e) => handleMobileChange(e.target.value)}
@@ -1020,7 +1014,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             )}
           </div>
 
-          {/* Gender + DOB */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
@@ -1041,7 +1034,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             </div>
           </div>
 
-          {/* Aadhar */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>
               Aadhar Number <span className="text-[9px] normal-case tracking-normal" style={{ color: T.textMuted }}>(12 digits, optional)</span>
@@ -1051,7 +1043,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
               placeholder="xxxxxxxxxxxx" className={inputCls} style={inputStyle} />
           </div>
 
-          {/* Address */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Address</label>
             <textarea value={address}
@@ -1146,7 +1137,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
               rows={2} placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
           </div>
 
-        </div>{/* end locked section */}
+        </div>
 
         {warning && (
           <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
@@ -1160,7 +1151,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
         )}
       </div>
 
-      {/* Footer */}
       <div className="shrink-0 flex gap-3 p-4 pt-3"
         style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
         <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
@@ -1191,12 +1181,16 @@ export default function Home() {
   const [, startTransition] = useTransition()
 
   const scrollRestoredRef = useRef(false)
+  const lastFetchRef = useRef<number>(0)
 
   const [students, setStudents] = useState<any[]>([])
-  const [search, setSearch] = useState(() => { try { return sessionStorage.getItem('dashboard_search') || '' } catch { return '' } })
-  const [searchInput, setSearchInput] = useState(() => { try { return sessionStorage.getItem('dashboard_search') || '' } catch { return '' } })
-  const [filter, setFilter] = useState(() => { try { return sessionStorage.getItem('dashboard_filter') || 'active' } catch { return 'active' } })
-  const [selectedCard, setSelectedCard] = useState(() => { try { return sessionStorage.getItem('dashboard_filter') || 'active' } catch { return 'active' } })
+
+  // ── FIX: Start with safe defaults — sessionStorage restored in useEffect after mount ──
+  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [filter, setFilter] = useState('active')
+  const [selectedCard, setSelectedCard] = useState('active')
+
   const [loading, setLoading] = useState(true)
   const [userName, setUserName] = useState('')
   const [role, setRole] = useState('')
@@ -1204,13 +1198,27 @@ export default function Home() {
   const [selectedMobiles, setSelectedMobiles] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
   const [renewStudent, setRenewStudent] = useState<any | null>(null)
-  const [showNewAdmission, setShowNewAdmission] = useState(() => {
-    try { const d = sessionStorage.getItem('new_admission_draft'); return !!d && Object.keys(JSON.parse(d)).length > 0 } catch { return false }
-  })
+  const [showNewAdmission, setShowNewAdmission] = useState(false)
 
   const [confirmModal, setConfirmModal] = useState<{
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
   } | null>(null)
+
+  // ── FIX: Restore sessionStorage values safely after mount (avoids hydration mismatch) ──
+  useEffect(() => {
+    try {
+      const savedFilter = sessionStorage.getItem('dashboard_filter') || 'active'
+      const savedSearch = sessionStorage.getItem('dashboard_search') || ''
+      setFilter(savedFilter)
+      setSelectedCard(savedFilter)
+      setSearch(savedSearch)
+      setSearchInput(savedSearch)
+      const hasDraft = (() => {
+        try { const d = sessionStorage.getItem('new_admission_draft'); return !!d && Object.keys(JSON.parse(d)).length > 0 } catch { return false }
+      })()
+      setShowNewAdmission(hasDraft)
+    } catch {}
+  }, [])
 
   useEffect(() => {
     let profileFetched = false
@@ -1257,7 +1265,13 @@ export default function Home() {
 
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') { cachedStudents = null; fetchStudents(true) }
+      if (document.visibilityState === 'visible') {
+        const now = Date.now()
+        if (now - lastFetchRef.current > 2 * 60 * 1000) {
+          cachedStudents = null
+          fetchStudents(true)
+        }
+      }
     }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
@@ -1268,6 +1282,7 @@ export default function Home() {
   async function fetchStudents(invalidate = false) {
     if (!invalidate && cachedStudents) { setStudents(cachedStudents); setLoading(false); return }
     setLoading(true)
+    lastFetchRef.current = Date.now()
     const { data, error } = await supabase.from('v_student_summary').select('*')
     if (!error) { setStudents(data || []); cachedStudents = data }
     setLoading(false)
@@ -1548,7 +1563,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── CHANGE 4: role passed to both popups ── */}
       {showNewAdmission && (
         <NewAdmissionPopup
           userName={userName}
