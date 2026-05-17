@@ -122,13 +122,16 @@ function ModalSheet({ onClose, children, accentColor = T.accent }: {
 }
 
 // ─── RENEW POPUP ──────────────────────────────────────────────────────────────
-function RenewPopup({ student, userName, onClose, onSuccess }: {
-  student: any; userName: string; onClose: () => void; onSuccess: () => void
+// ── Added role prop + warning state + admin soft bypass ──
+function RenewPopup({ student, userName, role, onClose, onSuccess }: {
+  student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
+  const isAdmin = role === 'admin'
   const [saving, setSaving] = useState(false)
   const [regId, setRegId] = useState('')
   const [regIdLoading, setRegIdLoading] = useState(true)
   const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
 
   const latestExpiry = toInputDate(student.latest_expiry || student.expiry || '')
   const [startDate, setStartDate] = useState(latestExpiry)
@@ -201,14 +204,26 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
   }
 
   const handleSubmit = async () => {
+    setWarning('')
     if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
       setError('Please fill all required fields'); return
     }
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
-    if (isDateOlderThan20Days(startDate)) { setError('Start date cannot be older than 20 days from today'); return }
+
+    // Start date check — admin gets warning, others blocked
+    if (isDateOlderThan20Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be older than 20 days from today'); return }
+      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    }
+
+    // Fees check — admin gets warning, others blocked
     const feesParsed = parseFloat(finalFees)
-    if (feesParsed < minFees) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
+    if (feesParsed < minFees) {
+      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
+      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
+    }
+
     if (!regId) { setError('Register ID not loaded. Please close and retry.'); return }
     setSaving(true); setError('')
 
@@ -353,6 +368,11 @@ function RenewPopup({ student, userName, onClose, onSuccess }: {
           <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
         </div>
 
+        {warning && (
+          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
+            <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
+          </div>
+        )}
         {error && (
           <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
             <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
@@ -814,16 +834,22 @@ export default function StudentDetail() {
         </div>
 
         {/* ── ADMISSION HISTORY TABLE ── */}
+        {/* ── Added columns: Fees Submitted, Mode, Due Paid, Due Paid Date, Due Mode ── */}
         <div className="rounded-2xl overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <div className="px-5 py-4" style={{ borderBottom: `1px solid ${T.border}` }}>
             <p className="text-sm font-semibold" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Admission History</p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" style={{ minWidth: '700px' }}>
+            <table className="w-full text-sm" style={{ minWidth: '1000px' }}>
               <thead>
                 <tr style={{ background: T.bg }}>
-                  {['Reg ID', 'Start', 'Expiry', 'Seat', 'Shift', 'Fees', 'Paid', 'Due', 'Status'].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-semibold"
+                  {[
+                    'Reg ID', 'Start', 'Expiry', 'Seat', 'Shift',
+                    'Fees', 'Fees Submitted', 'Mode',
+                    'Due', 'Due Paid', 'Due Date', 'Due Mode',
+                    'Status'
+                  ].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
                       style={{ color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>{h}</th>
                   ))}
                 </tr>
@@ -833,14 +859,56 @@ export default function StudentDetail() {
                   .map((row, i) => (
                     <tr key={row.register_id}
                       style={{ background: i % 2 === 0 ? T.surface : T.bg, borderBottom: `1px solid ${T.border}` }}>
-                      <td className="px-4 py-3 text-xs font-mono" style={{ color: T.textSub }}>{row.register_id}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: T.text }}>{formatDate(row.start_date)}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: T.text }}>{formatDate(row.expiry)}</td>
+                      <td className="px-4 py-3 text-xs font-mono whitespace-nowrap" style={{ color: T.textSub }}>{row.register_id}</td>
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.text }}>{formatDate(row.start_date)}</td>
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.text }}>{formatDate(row.expiry)}</td>
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: T.text }}>{row.seat}</td>
-                      <td className="px-4 py-3 text-xs" style={{ color: T.textSub }}>{row.shift}</td>
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.shift}</td>
+                      {/* Fees */}
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: T.text }}>₹{row.final_fees}</td>
-                      <td className="px-4 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>₹{row.fees_submitted || 0}</td>
-                      <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees > 0 ? '#dc2626' : T.textMuted }}>₹{row.due_fees || 0}</td>
+                      {/* Fees Submitted */}
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>
+                        ₹{row.fees_submitted || 0}
+                      </td>
+                      {/* Mode */}
+                      <td className="px-4 py-3 text-xs">
+                        {row.mode ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                            style={{
+                              background: row.mode === 'Online' ? '#eff6ff' : '#f0fdf4',
+                              color: row.mode === 'Online' ? '#1d4ed8' : '#166534',
+                              border: `1px solid ${row.mode === 'Online' ? '#bfdbfe' : '#86efac'}`,
+                            }}>
+                            {row.mode}
+                          </span>
+                        ) : <span style={{ color: T.textMuted }}>—</span>}
+                      </td>
+                      {/* Due */}
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees > 0 ? '#dc2626' : T.textMuted }}>
+                        ₹{row.due_fees || 0}
+                      </td>
+                      {/* Due Paid */}
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees_submitted > 0 ? '#16a34a' : T.textMuted }}>
+                        {row.due_fees_submitted > 0 ? `₹${row.due_fees_submitted}` : '—'}
+                      </td>
+                      {/* Due Paid Date */}
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
+                        {row.due_fees_submitted_date || '—'}
+                      </td>
+                      {/* Due Mode */}
+                      <td className="px-4 py-3 text-xs">
+                        {row.due_fees_mode ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                            style={{
+                              background: row.due_fees_mode === 'Online' ? '#eff6ff' : '#f0fdf4',
+                              color: row.due_fees_mode === 'Online' ? '#1d4ed8' : '#166534',
+                              border: `1px solid ${row.due_fees_mode === 'Online' ? '#bfdbfe' : '#86efac'}`,
+                            }}>
+                            {row.due_fees_mode}
+                          </span>
+                        ) : <span style={{ color: T.textMuted }}>—</span>}
+                      </td>
+                      {/* Status */}
                       <td className="px-4 py-3"><StatusBadge status={row.status}/></td>
                     </tr>
                   ))}
@@ -924,7 +992,10 @@ export default function StudentDetail() {
       )}
 
       {showRenewPopup && (
-        <RenewPopup student={renewStudentObj} userName={userName}
+        <RenewPopup
+          student={renewStudentObj}
+          userName={userName}
+          role={role}
           onClose={() => setShowRenewPopup(false)}
           onSuccess={() => fetchStudent()}/>
       )}
