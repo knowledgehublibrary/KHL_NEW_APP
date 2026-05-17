@@ -167,7 +167,8 @@ const StudentCard = memo(({
             </span>
             <a
               href={`tel:${s.mobile_number}`}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
+              onTouchEnd={(e) => { e.stopPropagation(); window.location.href = `tel:${s.mobile_number}` }}
               className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
               style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}
             >
