@@ -221,7 +221,7 @@ export default function ExpensesPage() {
       setUserName(profile?.name || '')
       setRole(r)
       if (r !== 'admin' && r !== 'manager' && r !== 'partner') { router.push('/'); return }
-      if (r === 'manager') setAfterDate(daysAgo(7))
+      if (r === 'manager') setAfterDate(daysAgo(90))
       fetchExpenses()
     }
     init()
