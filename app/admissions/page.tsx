@@ -43,12 +43,19 @@ function localEndOfDay(dateStr: string): Date {
   return new Date(y, m - 1, d, 23, 59, 59, 999)
 }
 
+function getManagerCutoff(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 90)
+  return d.toISOString().split('T')[0]
+}
+
 export default function AdmissionsPage() {
   const router = useRouter()
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
+  const [userRole, setUserRole] = useState('')
 
   const [afterDate, setAfterDate] = useState('')
   const [beforeDate, setBeforeDate] = useState('')
@@ -64,7 +71,11 @@ export default function AdmissionsPage() {
       if (!sessionData.session) { router.push('/login'); return }
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', sessionData.session.user.id).single()
       const r = profile?.role || ''
-      if (r !== 'admin' && r !== 'partner') { router.push('/'); return }
+      if (r !== 'admin' && r !== 'partner' && r !== 'manager') { router.push('/'); return }
+      setUserRole(r)
+      if (r === 'manager') {
+        setAfterDate(getManagerCutoff())
+      }
       fetchAllData()
     }
     init()
@@ -166,12 +177,35 @@ export default function AdmissionsPage() {
     }
   }, [filtered, afterDate, beforeDate])
 
+  const handleAfterDateChange = (val: string) => {
+    if (userRole === 'manager') {
+      const cutoff = getManagerCutoff()
+      if (val < cutoff) return // block dates older than 90 days
+    }
+    setAfterDate(val)
+  }
+
+  const handleClearFilters = () => {
+    if (userRole === 'manager') {
+      setAfterDate(getManagerCutoff())
+    } else {
+      setAfterDate('')
+    }
+    setBeforeDate('')
+    setSearchText('')
+    setStatusFilter('all')
+    setShiftFilter('all')
+    setAdmissionFilter('all')
+    setModeFilter('all')
+  }
+
   // iOS: font-size 16px prevents zoom
   const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const selectStyle: React.CSSProperties = { ...inputStyle, appearance: 'none' as any }
   const labelCls = "text-[10px] uppercase tracking-widest font-medium mb-1.5 block"
   const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
-  const hasFilters = afterDate || beforeDate || searchText || statusFilter !== 'all' || shiftFilter !== 'all' || admissionFilter !== 'all' || modeFilter !== 'all'
+  const managerCutoff = getManagerCutoff()
+  const hasFilters = (userRole === 'manager' ? afterDate !== managerCutoff : afterDate) || beforeDate || searchText || statusFilter !== 'all' || shiftFilter !== 'all' || admissionFilter !== 'all' || modeFilter !== 'all'
   const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`
 
   return (
@@ -187,6 +221,11 @@ export default function AdmissionsPage() {
               <h1 className="text-xl md:text-2xl font-bold" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>📋 Admissions Ledger</h1>
               <p className="text-[10px] mt-0.5 uppercase tracking-widest" style={{ color: T.textMuted }}>
                 {loading ? 'Loading…' : `${filtered.length} of ${totalCount} records`}
+                {userRole === 'manager' && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded-full" style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                    Last 90 days only
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -199,12 +238,26 @@ export default function AdmissionsPage() {
           <p className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: T.textMuted }}>Filters</p>
           <p className="text-[10px] mb-4 leading-relaxed" style={{ color: T.textMuted }}>
             📅 Date range filters on <span style={{ color: T.textSub, fontWeight: 600 }}>admission recorded date</span>. Rows where a <span style={{ color: T.textSub, fontWeight: 600 }}>due payment date</span> falls in the same range are also included.
+            {userRole === 'manager' && (
+              <span className="ml-1" style={{ color: T.accent, fontWeight: 600 }}>
+                · View is restricted to the last 90 days.
+              </span>
+            )}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
             <div className="sm:col-span-1">
               <label className={labelCls} style={{ color: T.textSub }}>From</label>
-              <input type="date" value={afterDate} onChange={(e) => setAfterDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl focus:outline-none" style={inputStyle}/>
+              <input
+                type="date"
+                value={afterDate}
+                onChange={(e) => handleAfterDateChange(e.target.value)}
+                min={userRole === 'manager' ? managerCutoff : undefined}
+                className="w-full px-3 py-2 rounded-xl focus:outline-none"
+                style={{ ...inputStyle, ...(userRole === 'manager' ? { cursor: 'default' } : {}) }}
+              />
+              {userRole === 'manager' && (
+                <p className="text-[9px] mt-1" style={{ color: T.textMuted }}>Earliest: {formatDate(managerCutoff)}</p>
+              )}
             </div>
             <div className="sm:col-span-1">
               <label className={labelCls} style={{ color: T.textSub }}>To</label>
@@ -262,7 +315,7 @@ export default function AdmissionsPage() {
           </div>
           {hasFilters && (
             <button className="mt-3 text-xs font-medium hover:underline" style={{ color: T.accent }}
-              onClick={() => { setAfterDate(''); setBeforeDate(''); setSearchText(''); setStatusFilter('all'); setShiftFilter('all'); setAdmissionFilter('all'); setModeFilter('all') }}>
+              onClick={handleClearFilters}>
               ✕ Clear all filters
             </button>
           )}
@@ -347,7 +400,7 @@ export default function AdmissionsPage() {
               <table className="w-full text-sm" style={{ minWidth: '1300px' }}>
                 <thead>
                   <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-                    {['#', 'Reg ID', 'Name', 'Mobile', 'Type', 'Recorded On', 'Start', 'Expiry', 'Months', 'Seat', 'Shift', 'Fees', 'Main Paid', 'Mode', 'Due Paid', 'Due Mode', 'Due Date', 'Pending Due', 'Status'].map(h => (
+                    {['#', 'Reg ID', 'Name', 'Mobile', 'Type', 'Recorded On', 'Start', 'Expiry', 'Months', 'Seat', 'Shift', 'Fees', 'Main Paid', 'Mode', 'Due Paid', 'Due Mode', 'Due Date', 'Pending Due', 'Status', 'Created By'].map(h => (
                       <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap" style={{ color: T.textMuted }}>{h}</th>
                     ))}
                   </tr>
@@ -417,6 +470,7 @@ export default function AdmissionsPage() {
                           {(row.due_fees || 0) > 0 ? fmt(row.due_fees) : '—'}
                         </td>
                         <td className="px-3 py-3"><StatusBadge status={row.status}/></td>
+                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.created_by || '—'}</td>
                       </tr>
                     )
                   })}
