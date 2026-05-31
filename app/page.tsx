@@ -1366,7 +1366,7 @@ export default function Home() {
   }
 
   const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canSeeLedger = role === 'admin' || role === 'partner'
+  const canSeeLedger = role === 'admin' || role === 'partner' || role === 'manager'
   const showBulkBlock = isPrivileged && filter === 'expired'
   const showBulkUnblock = isPrivileged && filter === 'blocked'
 
