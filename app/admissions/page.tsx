@@ -43,12 +43,6 @@ function localEndOfDay(dateStr: string): Date {
   return new Date(y, m - 1, d, 23, 59, 59, 999)
 }
 
-function getManagerCutoff(): string {
-  const d = new Date()
-  d.setDate(d.getDate() - 90)
-  return d.toISOString().split('T')[0]
-}
-
 export default function AdmissionsPage() {
   const router = useRouter()
   const [data, setData] = useState<any[]>([])
@@ -56,6 +50,7 @@ export default function AdmissionsPage() {
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [userRole, setUserRole] = useState('')
+  const [managerCutoff, setManagerCutoff] = useState('')
 
   const [afterDate, setAfterDate] = useState('')
   const [beforeDate, setBeforeDate] = useState('')
@@ -74,7 +69,18 @@ export default function AdmissionsPage() {
       if (r !== 'admin' && r !== 'partner' && r !== 'manager') { router.push('/'); return }
       setUserRole(r)
       if (r === 'manager') {
-        setAfterDate(getManagerCutoff())
+        const { data: cashLogData } = await supabase
+          .schema('library_management')
+          .from('cash_log')
+          .select('created_at')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const cutoff = cashLogData?.created_at
+          ? new Date(cashLogData.created_at).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0]
+        setManagerCutoff(cutoff)
+        setAfterDate(cutoff)
       }
       fetchAllData()
     }
@@ -178,16 +184,15 @@ export default function AdmissionsPage() {
   }, [filtered, afterDate, beforeDate])
 
   const handleAfterDateChange = (val: string) => {
-    if (userRole === 'manager') {
-      const cutoff = getManagerCutoff()
-      if (val < cutoff) return // block dates older than 90 days
+    if (userRole === 'manager' && managerCutoff) {
+      if (val < managerCutoff) return // block dates before the cutoff
     }
     setAfterDate(val)
   }
 
   const handleClearFilters = () => {
-    if (userRole === 'manager') {
-      setAfterDate(getManagerCutoff())
+    if (userRole === 'manager' && managerCutoff) {
+      setAfterDate(managerCutoff)
     } else {
       setAfterDate('')
     }
@@ -204,7 +209,6 @@ export default function AdmissionsPage() {
   const selectStyle: React.CSSProperties = { ...inputStyle, appearance: 'none' as any }
   const labelCls = "text-[10px] uppercase tracking-widest font-medium mb-1.5 block"
   const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
-  const managerCutoff = getManagerCutoff()
   const hasFilters = (userRole === 'manager' ? afterDate !== managerCutoff : afterDate) || beforeDate || searchText || statusFilter !== 'all' || shiftFilter !== 'all' || admissionFilter !== 'all' || modeFilter !== 'all'
   const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`
 
