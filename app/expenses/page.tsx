@@ -24,12 +24,6 @@ function formatDateTime(date: string) {
   return new Date(date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function daysAgo(n: number) {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().split('T')[0]
-}
-
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`
 
 // ─── ADD EXPENSE MODAL ────────────────────────────────────────────────────────
@@ -76,7 +70,6 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
     onSuccess(); onClose()
   }
 
-  // iOS: font-size 16px prevents zoom on focus
   const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
@@ -99,7 +92,6 @@ function AddExpenseModal({ userName, role, onClose, onSuccess }: {
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}>
         <div className="h-[3px] rounded-t-2xl" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-        {/* drag handle for mobile */}
         <div className="flex justify-center pt-3 pb-1 sm:hidden">
           <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
         </div>
@@ -203,9 +195,9 @@ export default function ExpensesPage() {
   const [userName, setUserName] = useState('')
   const [role, setRole] = useState('')
   const [showModal, setShowModal] = useState(false)
+  const [managerCutoff, setManagerCutoff] = useState('')
 
   const isManagerRestricted = role === 'manager'
-  const managerMinDate = daysAgo(90)
 
   const [afterDate, setAfterDate] = useState('')
   const [beforeDate, setBeforeDate] = useState('')
@@ -221,7 +213,20 @@ export default function ExpensesPage() {
       setUserName(profile?.name || '')
       setRole(r)
       if (r !== 'admin' && r !== 'manager' && r !== 'partner') { router.push('/'); return }
-      if (r === 'manager') setAfterDate(daysAgo(90))
+      if (r === 'manager') {
+        const { data: cashLogData } = await supabase
+          .schema('library_management')
+          .from('cash_log')
+          .select('created_at')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const cutoff = cashLogData?.created_at
+          ? new Date(cashLogData.created_at).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0]
+        setManagerCutoff(cutoff)
+        setAfterDate(cutoff)
+      }
       fetchExpenses()
     }
     init()
@@ -240,7 +245,7 @@ export default function ExpensesPage() {
 
   const filtered = useMemo(() => {
     const effectiveAfter = isManagerRestricted
-      ? (afterDate && afterDate > managerMinDate ? afterDate : managerMinDate)
+      ? (afterDate && afterDate > managerCutoff ? afterDate : managerCutoff)
       : afterDate
 
     return expenses.filter((row) => {
@@ -261,7 +266,7 @@ export default function ExpensesPage() {
       }
       return true
     })
-  }, [expenses, afterDate, beforeDate, searchText, modeFilter, isManagerRestricted, managerMinDate])
+  }, [expenses, afterDate, beforeDate, searchText, modeFilter, isManagerRestricted, managerCutoff])
 
   const summary = useMemo(() => {
     let total = 0, cash = 0, online = 0
@@ -274,9 +279,8 @@ export default function ExpensesPage() {
     return { total, cash, online, count: filtered.length }
   }, [filtered])
 
-  const hasFilters = (isManagerRestricted ? afterDate !== managerMinDate : !!afterDate) || beforeDate || searchText || modeFilter !== 'all'
+  const hasFilters = (isManagerRestricted ? afterDate !== managerCutoff : !!afterDate) || beforeDate || searchText || modeFilter !== 'all'
 
-  // iOS: font-size 16px on all filter inputs
   const inputStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const labelCls = "text-[10px] uppercase tracking-widest font-medium mb-1.5 block"
 
@@ -296,10 +300,10 @@ export default function ExpensesPage() {
               </h1>
               <p className="text-[10px] mt-0.5 uppercase tracking-widest" style={{ color: T.textMuted }}>
                 {loading ? 'Loading…' : `${filtered.length} of ${expenses.length} records`}
-                {isManagerRestricted && (
+                {isManagerRestricted && managerCutoff && (
                   <span className="ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-semibold"
                     style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
-                    Last 3 months
+                    After {formatDate(managerCutoff)}
                   </span>
                 )}
               </p>
@@ -315,26 +319,27 @@ export default function ExpensesPage() {
           </button>
         </div>
 
-        {/* FILTER PANEL — fixed for iOS: single-col on mobile, 2-col on sm, 5-col on md+ */}
+        {/* FILTER PANEL */}
         <div className="rounded-2xl p-4 sm:p-5 mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>Filters</p>
 
-          {isManagerRestricted && (
+          {isManagerRestricted && managerCutoff && (
             <div className="mb-4 px-3 py-2 rounded-xl flex items-center gap-2"
               style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
               <span className="text-sm">📅</span>
-              <p className="text-xs" style={{ color: T.accent }}>Showing expenses from the last 3 months only.</p>
+              <p className="text-xs" style={{ color: T.accent }}>
+                Showing expenses after {formatDate(managerCutoff)} only.
+              </p>
             </div>
           )}
 
-          {/* Grid: 1 col on mobile, 2 on sm, 5 on md — prevents iOS horizontal overflow */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>From</label>
               {isManagerRestricted ? (
                 <div className="w-full px-3 py-2 rounded-xl text-sm"
                   style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }}>
-                  {formatDate(managerMinDate)}
+                  {managerCutoff ? formatDate(managerCutoff) : '—'}
                 </div>
               ) : (
                 <input type="date" value={afterDate} onChange={(e) => setAfterDate(e.target.value)}
@@ -351,7 +356,6 @@ export default function ExpensesPage() {
                 )}
               </div>
             </div>
-            {/* Search spans 2 cols on sm to fill the row nicely */}
             <div className="sm:col-span-2 md:col-span-2">
               <label className={labelCls} style={{ color: T.textSub }}>Search</label>
               <input type="text" placeholder="Description or recorded by…" value={searchText}
@@ -368,15 +372,14 @@ export default function ExpensesPage() {
               </select>
             </div>
           </div>
-          {hasFilters && !isManagerRestricted && (
+          {hasFilters && (
             <button className="mt-3 text-xs font-medium hover:underline" style={{ color: T.accent }}
-              onClick={() => { setAfterDate(''); setBeforeDate(''); setSearchText(''); setModeFilter('all') }}>
-              ✕ Clear all filters
-            </button>
-          )}
-          {hasFilters && isManagerRestricted && (
-            <button className="mt-3 text-xs font-medium hover:underline" style={{ color: T.accent }}
-              onClick={() => { setAfterDate(managerMinDate); setBeforeDate(''); setSearchText(''); setModeFilter('all') }}>
+              onClick={() => {
+                setAfterDate(isManagerRestricted ? managerCutoff : '')
+                setBeforeDate('')
+                setSearchText('')
+                setModeFilter('all')
+              }}>
               ✕ Clear filters
             </button>
           )}
