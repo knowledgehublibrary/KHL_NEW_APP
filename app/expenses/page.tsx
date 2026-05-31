@@ -205,7 +205,7 @@ export default function ExpensesPage() {
   const [showModal, setShowModal] = useState(false)
 
   const isManagerRestricted = role === 'manager'
-  const managerMinDate = daysAgo(7)
+  const managerMinDate = daysAgo(90)
 
   const [afterDate, setAfterDate] = useState('')
   const [beforeDate, setBeforeDate] = useState('')
@@ -299,7 +299,7 @@ export default function ExpensesPage() {
                 {isManagerRestricted && (
                   <span className="ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-semibold"
                     style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
-                    Last 7 days
+                    Last 3 months
                   </span>
                 )}
               </p>
@@ -323,7 +323,7 @@ export default function ExpensesPage() {
             <div className="mb-4 px-3 py-2 rounded-xl flex items-center gap-2"
               style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
               <span className="text-sm">📅</span>
-              <p className="text-xs" style={{ color: T.accent }}>Showing expenses from the last 7 days only.</p>
+              <p className="text-xs" style={{ color: T.accent }}>Showing expenses from the last 3 months only.</p>
             </div>
           )}
 
