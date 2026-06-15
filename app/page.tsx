@@ -987,7 +987,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
               </p>
               <Link
                 href={`/student/${existingStudent.mobile_number}`}
-                onClick={onClose}
+                onClick={() => { clearDraft(); onClose() }}
                 className="flex items-center gap-3 p-3 rounded-xl"
                 style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}>
                 <div className="relative shrink-0">
