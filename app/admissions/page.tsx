@@ -76,9 +76,11 @@ export default function AdmissionsPage() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
-        const cutoff = cashLogData?.created_at
-          ? new Date(cashLogData.created_at).toISOString().split('T')[0]
-          : new Date().toISOString().split('T')[0]
+        const lastDate = cashLogData?.created_at
+          ? new Date(cashLogData.created_at)
+          : new Date()
+        lastDate.setDate(lastDate.getDate() + 1)
+        const cutoff = lastDate.toISOString().split('T')[0]
         setManagerCutoff(cutoff)
         setAfterDate(cutoff)
       }
