@@ -525,11 +525,6 @@ export default function AdminLedgerPage() {
       setAdmStartDate(d); setExpStartDate(d)
     }
 
-    #if (maxCashDate) {
-      #const d = toDateInput(new Date(maxCashDate))
-      #setAdmStartDate(d); setExpStartDate(d)
-    #}
-
     const c = cfgRows?.[0]
     if (c) {
       setRealBankBalance(c.real_bank_balance?.toString() || '0')
