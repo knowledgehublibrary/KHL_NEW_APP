@@ -519,9 +519,16 @@ export default function AdminLedgerPage() {
       ? cashRows.reduce((max: string, r: any) => r.created_at > max ? r.created_at : max, cashRows[0].created_at)
       : ''
     if (maxCashDate) {
-      const d = toDateInput(new Date(maxCashDate))
+      const lastDate = new Date(maxCashDate)
+      lastDate.setDate(lastDate.getDate() + 1)
+      const d = toDateInput(lastDate)
       setAdmStartDate(d); setExpStartDate(d)
     }
+
+    #if (maxCashDate) {
+      #const d = toDateInput(new Date(maxCashDate))
+      #setAdmStartDate(d); setExpStartDate(d)
+    #}
 
     const c = cfgRows?.[0]
     if (c) {
