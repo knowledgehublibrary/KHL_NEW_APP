@@ -40,6 +40,25 @@ function isDateOlderThan20Days(dateStr: string) {
   return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 20
 }
 
+/** Days until expiry (positive = future, negative = already past, null = no date) */
+function getExpiryDiffDays(dateStr: string): number | null {
+  if (!dateStr) return null
+  const expiry = new Date(dateStr)
+  if (isNaN(expiry.getTime())) return null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  expiry.setHours(0, 0, 0, 0)
+  return Math.round((expiry.getTime() - today.getTime()) / 86400000)
+}
+
+/** Pretty date for the expiry ribbon, e.g. "19 Jun 2026" */
+function formatExpiryDate(dateStr: string): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 /** Trim + convert any casing to Title Case */
 function toTitleCase(str: string): string {
   return str
@@ -129,10 +148,11 @@ function NewAdmissionButton({ onClick }: { onClick: () => void }) {
 
 // ─── STUDENT CARD ─────────────────────────────────────────────────────────────
 const StudentCard = memo(({
-  s, selectable, selected, onToggle, onRenew, role,
+  s, selectable, selected, onToggle, onRenew, role, highlight,
 }: {
   s: any; selectable: boolean; selected: boolean
   onToggle: (mobile: string) => void; onRenew: (s: any) => void; role: string
+  highlight?: 'yellow' | 'red' | null
 }) => {
   const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
   const canRenew = isPrivileged && s.status?.toLowerCase().includes('expired')
@@ -185,6 +205,11 @@ const StudentCard = memo(({
               </span>
             )}
             <span className="text-[10px]" style={{ color: T.textMuted }}>📄 {s.total_admissions}</span>
+            {s.latest_expiry && (
+              <span className="text-[10px] font-medium" style={{ color: T.textMuted }}>
+                📅 {formatExpiryDate(s.latest_expiry)}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -202,10 +227,13 @@ const StudentCard = memo(({
 
   const router = useRouter()
 
+  const highlightBg = highlight === 'yellow' ? '#fefce8' : highlight === 'red' ? '#fef2f2' : T.surface
+  const highlightBorder = highlight === 'yellow' ? '#fde047' : highlight === 'red' ? '#fca5a5' : T.border
+
   const baseStyle: React.CSSProperties = {
-    background: selected ? T.accentLight : T.surface,
-    border: `1px solid ${selected ? T.accentBorder : T.border}`,
-    boxShadow: selected ? `0 0 0 2px ${T.accentBorder}` : '0 1px 3px rgba(0,0,0,0.06)',
+    background: selected ? T.accentLight : highlightBg,
+    border: `1px solid ${selected ? T.accentBorder : highlightBorder}`,
+    boxShadow: selected ? `0 0 0 2px ${T.accentBorder}` : highlight ? `0 0 0 1px ${highlightBorder}` : '0 1px 3px rgba(0,0,0,0.06)',
   }
 
   const handleCardClick = (e: React.MouseEvent) => {
@@ -1361,12 +1389,22 @@ export default function Home() {
     }
   }
 
-  const filtered = useMemo(() => students.filter((s) => {
-    const matchSearch = s.name?.toLowerCase().includes(search.toLowerCase()) || s.mobile_number?.includes(search)
-    if (filter === 'all') return matchSearch
-    if (filter === 'frozen') return matchSearch && s.status?.toLowerCase().includes('freeze')
-    return matchSearch && s.status?.toLowerCase().includes(filter)
-  }), [students, search, filter])
+  const filtered = useMemo(() => {
+    const result = students.filter((s) => {
+      const matchSearch = s.name?.toLowerCase().includes(search.toLowerCase()) || s.mobile_number?.includes(search)
+      if (filter === 'all') return matchSearch
+      if (filter === 'frozen') return matchSearch && s.status?.toLowerCase().includes('freeze')
+      return matchSearch && s.status?.toLowerCase().includes(filter)
+    })
+    if (filter === 'expired') {
+      result.sort((a, b) => {
+        const da = a.latest_expiry ? new Date(a.latest_expiry).getTime() : 0
+        const db = b.latest_expiry ? new Date(b.latest_expiry).getTime() : 0
+        return db - da // most recently expired (e.g. expired today) comes first
+      })
+    }
+    return result
+  }, [students, search, filter])
 
   const stats = useMemo(() => ({
     total: students.length,
@@ -1614,6 +1652,14 @@ export default function Home() {
               const isEligibleForBulk = filter === 'blocked'
                 ? true
                 : (s.status?.toLowerCase().includes('expired') && !(s.total_due > 0))
+
+              const diffDays = getExpiryDiffDays(s.latest_expiry)
+              let highlight: 'yellow' | 'red' | null = null
+              if (diffDays !== null) {
+                if (filter === 'active' && diffDays <= 7) highlight = 'yellow'
+                else if (filter === 'expired') highlight = (-diffDays) <= 7 ? 'yellow' : 'red'
+              }
+
               return (
                 <StudentCard
                   key={s.mobile_number}
@@ -1622,7 +1668,8 @@ export default function Home() {
                   selected={selectedMobiles.has(s.mobile_number)}
                   onToggle={toggleSelect}
                   onRenew={setRenewStudent}
-                  role={role} />
+                  role={role}
+                  highlight={highlight} />
               )
             })}
           </div>
