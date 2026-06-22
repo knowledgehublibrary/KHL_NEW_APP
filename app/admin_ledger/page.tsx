@@ -1,18 +1,9 @@
 'use client'
 
-//export const dynamic = 'force-dynamic'
-
-import { useEffect, useState, useMemo, useTransition, memo, useCallback, useRef } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-
-let cachedStudents: any[] | null = null
-
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyxI48i0cFx3c4-MRADfa5nQKQJLIzJR8xAwB0UArEe0_arfxRObvjZA3Tccc6pRE4/exec'
-const RENEW_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSc5KbtfqUpgRuohNyQdhVb-xahCRVTBizCXPobr0vyErzvX_Q/viewform'
-const PHOTO_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSfq6Ajw4dxXw1PiwLR_Bu6GhNccUXSRTSo6yQgj_2o6SpZDkw/viewform'
-const PHOTO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX-eQ5-UcKiDY1Aa15KnXG52gEK33tkIVAXaWM8lN5CFxdnMyZXqVng0rfnfWYh-vG/exec'
+import Link from 'next/link'
 
 const T = {
   bg: '#faf8f5', surface: '#ffffff',
@@ -21,1697 +12,1192 @@ const T = {
   text: '#1c1917', textSub: '#78716c', textMuted: '#a8a29e',
 }
 
-const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
+const LAST_NET          = 104059
+const LAST_BANK_BALANCE = 98709
 
-function getProxyUrl(url: string) {
-  if (!url) return ''
-  return `/api/image?url=${encodeURIComponent(url)}`
+const fmt = (n: number) => `₹${Math.abs(n).toLocaleString('en-IN')}`
+const fmtSigned = (n: number) =>
+  n === 0 ? '₹0' : n > 0
+    ? `+₹${n.toLocaleString('en-IN')}`
+    : `-₹${Math.abs(n).toLocaleString('en-IN')}`
+
+function formatDate(date: string) {
+  if (!date) return '-'
+  return new Date(date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function toInputDate(dateStr: string) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  if (isNaN(d.getTime())) return ''
-  return d.toISOString().split('T')[0]
-}
-
-function isDateOlderThan20Days(dateStr: string) {
-  if (!dateStr) return false
-  return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 20
-}
-
-/** Days until expiry (positive = future, negative = already past, null = no date) */
-function getExpiryDiffDays(dateStr: string): number | null {
-  if (!dateStr) return null
-  const expiry = new Date(dateStr)
-  if (isNaN(expiry.getTime())) return null
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  expiry.setHours(0, 0, 0, 0)
-  return Math.round((expiry.getTime() - today.getTime()) / 86400000)
-}
-
-/** Pretty date for the expiry ribbon, e.g. "19 Jun 2026" */
-function formatExpiryDate(dateStr: string): string {
-  if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  if (isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-/** Trim + convert any casing to Title Case */
-function toTitleCase(str: string): string {
-  return str
-    .trim()
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-async function pingAppsScript() {
-  try {
-    await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' })
-  } catch (e) {
-    console.warn('Apps Script ping failed:', e)
-  }
-}
-
-// ─── CONFIRM MODAL ────────────────────────────────────────────────────────────
-function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onConfirm, onCancel }: {
-  message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void
-}) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4"
-      style={{ background: 'rgba(28,25,23,0.6)', backdropFilter: 'blur(4px)' }}>
-      <div className="w-full sm:max-w-xs rounded-t-2xl sm:rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-        <div className="h-[3px] rounded-t-2xl"
-          style={{ background: `linear-gradient(90deg, transparent, ${danger ? '#dc2626' : T.accent}, transparent)` }} />
-        <div className="p-6 pb-[max(24px,env(safe-area-inset-bottom,24px))]">
-          <p className="text-sm font-medium text-center mb-6" style={{ color: T.text }}>{message}</p>
-          <div className="flex gap-3">
-            <button onClick={onCancel}
-              className="flex-1 py-3 rounded-xl text-sm font-medium"
-              style={{ border: `1px solid ${T.border}`, color: T.textSub }}>
-              Cancel
-            </button>
-            <button onClick={onConfirm}
-              className="flex-1 py-3 rounded-xl text-sm font-semibold"
-              style={{ background: danger ? '#dc2626' : T.accent, color: 'white' }}>
-              {confirmLabel}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+function formatDateTime(date: string) {
+  if (!date) return '-'
+  return new Date(date).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
 }
 
 function StatusBadge({ status }: { status: string }) {
   const s = status?.toLowerCase() || ''
   let bg = '#fef9c3', color = '#854d0e', border = '#fde68a'
-  if (s.includes('expired')) { bg = '#fee2e2'; color = '#991b1b'; border = '#fca5a5' }
-  else if (s.includes('active')) { bg = '#dcfce7'; color = '#166534'; border = '#86efac' }
+  if (s.includes('expired'))      { bg = '#fee2e2'; color = '#991b1b'; border = '#fca5a5' }
+  else if (s.includes('active'))  { bg = '#dcfce7'; color = '#166534'; border = '#86efac' }
   else if (s.includes('blocked')) { bg = '#f3f4f6'; color = '#4b5563'; border = '#d1d5db' }
-  else if (s.includes('freeze')) { bg = '#e0f2fe'; color = '#075985'; border = '#7dd3fc' }
+  else if (s.includes('freeze') || s.includes('freezed')) { bg = '#e0f2fe'; color = '#075985'; border = '#7dd3fc' }
   return (
-    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider"
+    <span
+      className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap"
       style={{ background: bg, color, border: `1px solid ${border}` }}>
       {status}
     </span>
   )
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 mb-3 mt-5">
-      <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>
-        {children}
-      </span>
-      <div className="flex-1 h-px" style={{ background: T.border }} />
-    </div>
-  )
-}
-
-function NewAdmissionButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
-      style={{ background: T.accent, color: 'white', boxShadow: `0 2px 12px ${T.accent}50` }}>
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-      </svg>
-      New Admission
-    </button>
-  )
-}
-
-// ─── STUDENT CARD ─────────────────────────────────────────────────────────────
-const StudentCard = memo(({
-  s, selectable, selected, onToggle, onRenew, role, highlight,
-}: {
-  s: any; selectable: boolean; selected: boolean
-  onToggle: (mobile: string) => void; onRenew: (s: any) => void; role: string
-  highlight?: 'yellow' | 'red' | null
-}) => {
-  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canRenew = isPrivileged && s.status?.toLowerCase().includes('expired')
-  const statusDot = s.status?.includes('Active') ? '#16a34a'
-    : s.status?.includes('Blocked') ? '#9ca3af'
-      : s.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
-        : '#dc2626'
-
-  const innerContent = (
-    <>
-      {selectable && (
-        <div className="absolute top-3 right-3 z-10 w-5 h-5 rounded-md flex items-center justify-center"
-          style={{ background: selected ? T.accent : 'transparent', border: `2px solid ${selected ? T.accent : T.borderHover}` }}>
-          {selected && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-        </div>
-      )}
-      <div className="flex items-center gap-4 p-4">
-        <div className="relative shrink-0">
-          <img loading="lazy" src={getProxyUrl(s.image_url) || '/default-avatar.png'}
-            onError={(e) => { e.currentTarget.src = '/default-avatar.png' }}
-            className="w-14 h-14 rounded-xl object-cover" style={{ border: `1px solid ${T.border}` }} />
-          <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2"
-            style={{ borderColor: T.surface, background: statusDot }} />
-        </div>
-        <div className="flex-1 min-w-0 pr-6">
-          <p className="font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif", fontSize: '15px' }}>{s.name}</p>
-
-          {/* ── FIX: plain text number + proper <a href="tel:"> Call pill — works on iOS & Android ── */}
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs" style={{ color: T.textSub }}>
-              {s.mobile_number}
-            </span>
-            <a
-              href={`tel:${s.mobile_number}`}
-              onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
-              onTouchEnd={(e) => { e.stopPropagation(); window.location.href = `tel:${s.mobile_number}` }}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
-              style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}
-            >
-              📞 Call
-            </a>
-          </div>
-
-          <div className="mt-2 flex items-center gap-2 flex-wrap">
-            <StatusBadge status={s.status} />
-            {s.total_due > 0 && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>
-                Due ₹{s.total_due}
-              </span>
-            )}
-            <span className="text-[10px]" style={{ color: T.textMuted }}>📄 {s.total_admissions}</span>
-            {s.latest_expiry && (
-              <span className="text-[10px] font-medium" style={{ color: T.textMuted }}>
-                📅 {formatExpiryDate(s.latest_expiry)}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-      {canRenew && !selectable && (
-        <div className="px-4 pb-4 -mt-1">
-          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRenew(s) }}
-            className="w-full py-1.5 rounded-lg text-xs font-semibold tracking-wide"
-            style={{ background: T.accent, color: 'white' }}>
-            ↺ Renew
-          </button>
-        </div>
-      )}
-    </>
-  )
-
-  const router = useRouter()
-
-  const highlightBg = highlight === 'yellow' ? '#fefce8' : highlight === 'red' ? '#fef2f2' : T.surface
-  const highlightBorder = highlight === 'yellow' ? '#fde047' : highlight === 'red' ? '#fca5a5' : T.border
-
-  const baseStyle: React.CSSProperties = {
-    background: selected ? T.accentLight : highlightBg,
-    border: `1px solid ${selected ? T.accentBorder : highlightBorder}`,
-    boxShadow: selected ? `0 0 0 2px ${T.accentBorder}` : highlight ? `0 0 0 1px ${highlightBorder}` : '0 1px 3px rgba(0,0,0,0.06)',
-  }
-
-  const handleCardClick = (e: React.MouseEvent) => {
-    // Don't navigate if clicking the Call link or Renew button
-    const target = e.target as HTMLElement
-    if (target.closest('a') || target.closest('button')) return
-    router.push(`/student/${s.mobile_number}`)
-  }
-
-  if (selectable) {
-    return (
-      <div className="relative rounded-2xl overflow-hidden cursor-pointer select-none" style={baseStyle}
-        onClick={() => onToggle(s.mobile_number)}>{innerContent}</div>
-    )
-  }
-  return (
-    <div
-      className="relative rounded-2xl overflow-hidden cursor-pointer hover:bg-orange-50/40 transition-colors"
-      style={baseStyle}
-      onClick={handleCardClick}
-    >
-      {innerContent}
-    </div>
-  )
-})
-StudentCard.displayName = 'StudentCard'
-
-// ─── MODAL SHELL ──────────────────────────────────────────────────────────────
-function ModalShell({ onBackdropClick, children }: {
-  onBackdropClick: () => void
-  children: React.ReactNode
+function MetricCard({ label, value, sub, color, bg, border, formula }: {
+  label: string; value: string; sub?: string
+  color?: string; bg?: string; border?: string; formula?: string
 }) {
   return (
+    <div className="rounded-xl p-4" style={{ background: bg || T.surface, border: `1px solid ${border || T.border}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>{label}</p>
+      <p className="text-xl font-bold" style={{ color: color || T.text, fontFamily: "'Georgia', serif" }}>{value}</p>
+      {sub     && <p className="text-[10px] mt-1"              style={{ color: T.textMuted }}>{sub}</p>}
+      {formula && <p className="text-[9px] mt-1 font-mono"     style={{ color: T.textMuted, opacity: 0.7 }}>{formula}</p>}
+    </div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-6">
+      <p className="text-[10px] uppercase tracking-widest font-semibold mb-3" style={{ color: T.textMuted }}>
+        {title}
+      </p>
+      {children}
+    </div>
+  )
+}
+
+// ─── SHARED STYLES ────────────────────────────────────────────────────────────
+const inputBaseStyle: React.CSSProperties = {
+  background: T.bg,
+  border: `1px solid ${T.border}`,
+  color: T.text,
+  fontSize: '16px',
+  WebkitAppearance: 'none',
+}
+const labelCls  = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
+const inputCls  = "w-full px-3 rounded-xl focus:outline-none"
+const inputHCls = "py-2.5"
+
+// ─── VIEW TOGGLE ──────────────────────────────────────────────────────────────
+function ViewToggle({ view, onChange }: { view: 'glance' | 'detailed'; onChange: (v: 'glance' | 'detailed') => void }) {
+  return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
-      style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onBackdropClick() }}>
+      className="flex items-center rounded-xl p-1 gap-1"
+      style={{ background: T.bg, border: `1px solid ${T.border}` }}>
+      {(['glance', 'detailed'] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          className="px-4 rounded-lg text-xs font-semibold capitalize transition-all"
+          style={{
+            minHeight: '34px',
+            touchAction: 'manipulation',
+            background: view === v ? T.surface : 'transparent',
+            color: view === v ? T.accent : T.textMuted,
+            border: view === v ? `1px solid ${T.border}` : '1px solid transparent',
+            boxShadow: view === v ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
+          }}>
+          {v === 'glance' ? '👁 Glance' : '📊 Detailed'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ─── GLANCE VIEW ─────────────────────────────────────────────────────────────
+function GlanceView({ m, balanced }: { m: any; balanced: (v: number) => boolean }) {
+  const greenSet  = { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0' }
+  const amberSet  = { color: '#92400e', bg: '#fefce8', border: '#fde68a' }
+  const blueSet   = { color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' }
+
+  return (
+    <div className="mb-6">
+      <p className="text-[10px] uppercase tracking-widest font-semibold mb-3" style={{ color: T.textMuted }}>
+        At a Glance
+      </p>
+
+      <div className="grid grid-cols-2 gap-2 md:gap-3 mb-2">
+        {/* Net Profit */}
+        <MetricCard
+          label="📈 Net Profit"
+          value={fmt(m.netProfit)}
+          formula="Opening + Fees − Exp"
+          color={m.netProfit >= 0 ? '#166534' : '#dc2626'}
+          bg={m.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'}
+          border={m.netProfit >= 0 ? '#bbf7d0' : '#fecaca'}
+        />
+        {/* Cash in Hand */}
+        <MetricCard
+          label="💰 Cash in Hand"
+          value={fmt(m.cashInHand)}
+          sub="Received − All Dr"
+          color={m.cashInHand >= 0 ? '#92400e' : '#dc2626'}
+          bg={m.cashInHand >= 0 ? '#fefce8' : '#fef2f2'}
+          border={m.cashInHand >= 0 ? '#fde68a' : '#fecaca'}
+        />
+        {/* Expected Bank */}
+        <MetricCard
+          label="🏦 Expected Bank"
+          value={fmt(m.expectedBankBalance)}
+          sub="Opening+Banked+Online−Exp"
+          {...blueSet}
+        />
+        {/* Remaining */}
+        <MetricCard
+          label="🔄 Remaining"
+          value={fmt(m.remainingToCollect)}
+          sub="Fees−InHand−ExpBank"
+          color={balanced(m.remainingToCollect) ? '#166534' : '#d97706'}
+          bg={balanced(m.remainingToCollect) ? '#f0fdf4' : '#fffbeb'}
+          border={balanced(m.remainingToCollect) ? '#bbf7d0' : '#fde68a'}
+        />
+      </div>
+
+      {/* Bank Error + Still to Check inline summary */}
       <div
-        className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col"
+        className="flex items-center gap-3 px-4 py-3 rounded-xl flex-wrap"
         style={{
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          maxHeight: 'calc(100dvh - 60px)',
+          background: balanced(m.bankError) ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${balanced(m.bankError) ? '#bbf7d0' : '#fecaca'}`,
         }}>
-        {children}
+        <span className="text-sm" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626' }}>
+          {balanced(m.bankError) ? '✅' : '⚠️'}
+        </span>
+        <span className="text-xs font-semibold" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626' }}>
+          Bank Error: {fmtSigned(m.bankError)}
+        </span>
+        {!balanced(m.bankError) && (
+          <>
+            <span className="text-[10px]" style={{ color: T.textMuted }}>·</span>
+            <span className="text-xs" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c' }}>
+              Still to check: {fmtSigned(m.stillToCheck)}
+            </span>
+          </>
+        )}
+        {balanced(m.bankError) && (
+          <span className="text-xs font-medium" style={{ color: '#166534' }}>Balanced ✓</span>
+        )}
       </div>
     </div>
   )
 }
 
-// ─── RENEW POPUP ──────────────────────────────────────────────────────────────
-function RenewPopup({ student, userName, role, onClose, onSuccess }: {
-  student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
+// ─── ADD CASH LOG MODAL ───────────────────────────────────────────────────────
+function AddCashLogModal({ userName, onClose, onSuccess }: {
+  userName: string; onClose: () => void; onSuccess: () => void
 }) {
-  const isAdmin = role === 'admin'
-  const [saving, setSaving] = useState(false)
-  const [regId, setRegId] = useState('')
-  const [regIdLoading, setRegIdLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [warning, setWarning] = useState('')
-
-  const latestExpiry = toInputDate(student.latest_expiry || '')
-  const [startDate, setStartDate] = useState(latestExpiry)
-  const [months, setMonths] = useState(student.latest_months?.toString() || '1')
-  const [seat, setSeat] = useState(student.latest_seat?.toString() || '')
-  const [selectedShifts, setSelectedShifts] = useState<string[]>(
-    student.latest_shift ? student.latest_shift.split(', ').map((x: string) => x.trim()) : []
-  )
-  const [finalFees, setFinalFees] = useState(student.latest_fees?.toString() || '')
-  const [feesSubmitted, setFeesSubmitted] = useState(student.latest_fees?.toString() || '')
-  const [mode, setMode] = useState('Cash')
-  const [comment, setComment] = useState('')
-  const now = new Date().toISOString()
-
-  const minFees = Math.round(500 * parseFloat(months || '1'))
-
-  useEffect(() => {
-    const fetchRegId = async () => {
-      setRegIdLoading(true)
-      const { data: lastRecord } = await supabase.schema('library_management').from('admission_responses')
-        .select('register_id').order('id', { ascending: false }).limit(1).maybeSingle()
-      if (lastRecord?.register_id) {
-        const { data: nextId } = await supabase.rpc('get_next_reg_id', { current_val: lastRecord.register_id })
-        setRegId(nextId || '')
-      }
-      setRegIdLoading(false)
-    }
-    fetchRegId()
-  }, [])
-
-  const toggleShift = (shift: string) =>
-    setSelectedShifts(prev => prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift])
-
-  const handleStartDateChange = (val: string) => {
-    setStartDate(val)
-    if (isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days')
-    else if (error.includes('Start date')) setError('')
-  }
-
-  const handleFeesChange = (val: string) => {
-    setFinalFees(val); setFeesSubmitted(val)
-    const parsed = parseFloat(val)
-    const currentMin = Math.round(500 * parseFloat(months || '1'))
-    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    else if (error.startsWith('Minimum fees')) setError('')
-  }
-
-  const handleMonthsChange = (val: string) => {
-    setMonths(val)
-    const currentMin = Math.round(500 * parseFloat(val || '1'))
-    const parsed = parseFloat(finalFees)
-    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
-    else if (error.startsWith('Minimum fees')) setError('')
-  }
+  const [amount, setAmount]           = useState('')
+  const [type, setType]               = useState<'Cr' | 'Dr'>('Cr')
+  const [description, setDescription] = useState('')
+  const [goesToBank, setGoesToBank]   = useState<boolean | null>(null)
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState('')
 
   const handleSubmit = async () => {
-    setWarning('')
-    if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
-      setError('Please fill all required fields'); return
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      setError('Enter a valid positive amount'); return
     }
-    const seatNum = parseInt(seat)
-    if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
-
-    if (isDateOlderThan20Days(startDate)) {
-      if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
-      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    if (!description.trim()) { setError('Please enter a description'); return }
+    if (type === 'Cr' && goesToBank === null) {
+      setError('Please specify if this amount goes to bank'); return
     }
-
-    if (parseFloat(finalFees) < minFees) {
-      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
-      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
-    }
-
-    if (!regId) { setError('Register ID not loaded'); return }
     setSaving(true); setError('')
 
-    const payload = {
-      timestamp: now, name: student.name, mobile_number: student.mobile_number,
-      admission: 'Renew', address: null, gender: null, date_of_birth: null, aadhar_number: null, photo: null,
-      start_date: startDate, months: parseFloat(months), seat, shift: selectedShifts.join(', '),
-      final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
-      mode, register_id: regId, comment: comment || null, created_by: userName,
-    }
-
-    const { error: insertError } = await supabase.schema('library_management').from('admission_responses').insert([payload])
-    if (insertError) { setError(insertError.message); setSaving(false); return }
-
-    pingAppsScript()
-    onSuccess(); onClose()
-  }
-
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
-  const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
-  const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
-
-  return (
-    <ModalShell onBackdropClick={onClose}>
-      <div className="h-[3px] rounded-t-2xl shrink-0" style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-      <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
-        <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
-      </div>
-      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Renew Membership</h2>
-            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>All fields marked * are required</p>
-          </div>
-          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
-        </div>
-        <div className="mb-5 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
-          🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-        </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Name</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.name}</div>
-          </div>
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Mobile</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{student.mobile_number}</div>
-          </div>
-        </div>
-        <div className="mb-4">
-          <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
-          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
-            {regIdLoading ? <span className="animate-pulse">Fetching…</span> : regId || '—'}
-          </div>
-        </div>
-        <div className="mb-4">
-          <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-          <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} className={inputCls} style={inputStyle} />
-        </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-            <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)} min="1" className={inputCls} style={inputStyle} />
-          </div>
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-            <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle} />
-          </div>
-        </div>
-        <div className="mb-4">
-          <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
-          <div className="space-y-2">
-            {SHIFTS.map((shift) => {
-              const checked = selectedShifts.includes(shift)
-              return (
-                <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
-                  style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
-                  <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
-                  <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                    style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
-                    {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                  </div>
-                  <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
-                </label>
-              )
-            })}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>
-              Final Fees *
-              {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
-            </label>
-            <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)} className={inputCls} style={inputStyle} />
-          </div>
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-            <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-            <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
-              <option value="Cash">Cash</option>
-              <option value="Online">Online</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>Renew</div>
-          </div>
-        </div>
-        <div className="mb-4">
-          <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-          <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-            placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
-        </div>
-        <div className="mb-2">
-          <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
-          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
-        </div>
-        {warning && (
-          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
-            <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
-          </div>
-        )}
-        {error && (
-          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-          </div>
-        )}
-      </div>
-      <div className="shrink-0 flex gap-3 p-4 pt-3"
-        style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-          style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-        <button onClick={handleSubmit} disabled={saving || regIdLoading}
-          className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-          style={{ background: T.accent, color: 'white' }}>
-          {saving
-            ? <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Saving…
-              </span>
-            : '✓ Confirm Renewal'}
-        </button>
-      </div>
-    </ModalShell>
-  )
-}
-
-// ─── DRAFT HELPERS ────────────────────────────────────────────────────────────
-const DRAFT_KEY = 'new_admission_draft'
-
-function getDrivePreviewUrl(driveUrl: string): string {
-  if (!driveUrl) return ''
-  try {
-    const idMatch = driveUrl.match(/[?&]id=([^&]+)/) || driveUrl.match(/\/d\/([^/]+)/)
-    if (idMatch?.[1]) return `https://lh3.googleusercontent.com/d/${idMatch[1]}`
-  } catch {}
-  return driveUrl
-}
-
-function loadDraft(): Record<string, any> {
-  try {
-    const raw = sessionStorage.getItem(DRAFT_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-
-function saveDraft(patch: Record<string, any>) {
-  try {
-    const current = loadDraft()
-    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ ...current, ...patch }))
-  } catch {}
-}
-
-function clearDraft() {
-  try { sessionStorage.removeItem(DRAFT_KEY) } catch {}
-}
-
-
-// ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-// CHANGES from original:
-//   1. Mobile number field moved ABOVE photo section (Step 1)
-//   2. Photo upload is locked until mobile is valid & not a duplicate (Step 2)
-//   3. Rest of form still locked until photo is verified (Step 3)
-//   4. Mobile field removed from the Personal Details section (no duplicate field)
-
-function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
-  userName: string; role: string; onClose: () => void; onSuccess: () => void
-}) {
-  const isAdmin = role === 'admin'
-  const draft = loadDraft()
-
-  const [regId, setRegId] = useState('')
-  const [regIdLoading, setRegIdLoading] = useState(true)
-
-  // ── Photo ──────────────────────────────────────────────────────────────────
-  const [photoVerified, setPhotoVerified] = useState(false)
-  const [photoUrl, setPhotoUrl] = useState('')
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState('')
-  const [photoPhase, setPhotoPhase] = useState<'idle' | 'countdown' | 'polling' | 'done' | 'failed'>('idle')
-  const [photoCountdown, setPhotoCountdown] = useState(30)
-  const [pollCountdown, setPollCountdown] = useState(5)
-  const [photoError, setPhotoError] = useState('')
-  const pollingRef = useRef<{ stop: () => void } | null>(null)
-  const [instantChecking, setInstantChecking] = useState(false)
-
-  // ── Personal fields ────────────────────────────────────────────────────────
-  const [name, setName] = useState(draft.name || '')
-  const [mobile, setMobile] = useState(draft.mobile || '')
-  const [mobileError, setMobileError] = useState('')
-  const [existingStudent, setExistingStudent] = useState<any | null>(null)
-  const [address, setAddress] = useState(draft.address || '')
-  const [gender, setGender] = useState(draft.gender || '')
-  const [dob, setDob] = useState(draft.dob || '')
-  const [aadhar, setAadhar] = useState(draft.aadhar || '')
-
-  // ── Admission fields ───────────────────────────────────────────────────────
-  const now = new Date().toISOString()
-  const [startDate, setStartDate] = useState(draft.startDate || toInputDate(now))
-  const [months, setMonths] = useState(draft.months || '1')
-  const [seat, setSeat] = useState(draft.seat ?? '0')
-  const [selectedShifts, setSelectedShifts] = useState<string[]>(draft.selectedShifts || [...SHIFTS])
-  const [finalFees, setFinalFees] = useState(draft.finalFees || '500')
-  const [feesSubmitted, setFeesSubmitted] = useState(draft.feesSubmitted || '500')
-  const [mode, setMode] = useState(draft.mode || 'Cash')
-  const [comment, setComment] = useState(draft.comment || '')
-
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [warning, setWarning] = useState('')
-
-  const minFees = Math.round(500 * parseFloat(months || '1'))
-
-  // Gate 1: mobile must be 10 digits and not a duplicate
-  const mobileOk = mobile.length === 10 && !existingStudent
-  // Gate 2: photo must be verified (only reachable after mobileOk)
-  const fieldsLocked = !photoVerified
-
-  useEffect(() => {
-    const fetchRegId = async () => {
-      setRegIdLoading(true)
-      const { data: lastRecord } = await supabase
-        .schema('library_management').from('admission_responses')
-        .select('register_id').order('id', { ascending: false }).limit(1).maybeSingle()
-      if (lastRecord?.register_id) {
-        const { data: nextId } = await supabase.rpc('get_next_reg_id', { current_val: lastRecord.register_id })
-        setRegId(nextId || '')
-      }
-      setRegIdLoading(false)
-    }
-    fetchRegId()
-    return () => { pollingRef.current?.stop() }
-  }, [])
-
-  const sd = (patch: Record<string, any>) => saveDraft(patch)
-
-  const doSingleCheck = async (): Promise<boolean> => {
-    try {
-      const res = await fetch(`${PHOTO_SCRIPT_URL}?action=getPhotoUrl&register_id=${encodeURIComponent(regId)}`)
-      const json = await res.json()
-      if (json.status === 'found' && json.url) {
-        setPhotoUrl(json.url)
-        setPhotoPreviewUrl(getDrivePreviewUrl(json.url))
-        setPhotoVerified(true)
-        setPhotoPhase('done')
-        setPhotoError('')
-        return true
-      }
-    } catch {}
-    return false
-  }
-
-  const beginPolling = (stopped: { value: boolean }) => {
-    setPhotoPhase('polling')
-    const startedAt = Date.now()
-    const MAX_MS = 3 * 60 * 1000
-    const runCycle = async () => {
-      if (stopped.value) return
-      if (Date.now() - startedAt > MAX_MS) {
-        setPhotoPhase('failed')
-        setPhotoError('Photo not found after 3 minutes. Please re-upload and try again.')
-        return
-      }
-      const found = await doSingleCheck()
-      if (found) return
-      let c = 5; setPollCountdown(c)
-      const tick = setInterval(() => {
-        if (stopped.value) { clearInterval(tick); return }
-        c -= 1; setPollCountdown(c)
-        if (c <= 0) { clearInterval(tick); runCycle() }
-      }, 1000)
-    }
-    runCycle()
-  }
-
-  const startAutoFlow = () => {
-    if (!regId || photoPhase === 'countdown' || photoPhase === 'polling') return
-    setPhotoError(''); setPhotoVerified(false); setPhotoUrl(''); setPhotoPreviewUrl('')
-    setPhotoPhase('countdown'); setPhotoCountdown(30)
-    const stopped = { value: false }
-    pollingRef.current = { stop: () => { stopped.value = true } }
-    let remaining = 30
-    const t = setInterval(() => {
-      if (stopped.value) { clearInterval(t); return }
-      remaining -= 1; setPhotoCountdown(remaining)
-      if (remaining <= 0) { clearInterval(t); if (!stopped.value) beginPolling(stopped) }
-    }, 1000)
-  }
-
-  const instantVerify = async () => {
-    if (!regId || instantChecking) return
-    setInstantChecking(true); setPhotoError('')
-    const found = await doSingleCheck()
-    if (!found) setPhotoError('Photo not found. Please make sure you submitted the form and try again.')
-    setInstantChecking(false)
-  }
-
-  const openPhotoForm = () => {
-    if (!regId) return
-    // Guard: don't allow photo upload until mobile is valid & unique
-    if (!mobileOk) return
-    window.open(`${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`, '_blank')
-    startAutoFlow()
-  }
-
-  const handleNameBlur = () => {
-    if (!name.trim()) return
-    const formatted = toTitleCase(name)
-    setName(formatted)
-    sd({ name: formatted })
-  }
-
-  const handleMobileChange = async (val: string) => {
-    const digits = val.replace(/\D/g, '').slice(0, 10)
-    setMobile(digits); sd({ mobile: digits }); setMobileError(''); setExistingStudent(null)
-
-    // Reset photo state whenever mobile changes — prevents stale photo being
-    // linked to a newly entered number
-    if (photoVerified || photoPhase !== 'idle') {
-      pollingRef.current?.stop()
-      setPhotoVerified(false); setPhotoUrl(''); setPhotoPreviewUrl('')
-      setPhotoPhase('idle'); setPhotoError('')
-    }
-
-    if (digits.length === 10) {
-      const { data, error: qErr } = await supabase
-        .from('v_student_summary')
-        .select('name, mobile_number, status, image_url')
-        .eq('mobile_number', digits)
-        .maybeSingle()
-      if (!qErr && data) { setMobileError('exists'); setExistingStudent(data) }
-    }
-  }
-
-  const handleStartDateChange = (val: string) => {
-    setStartDate(val); sd({ startDate: val })
-    if (isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days')
-    else if (error.includes('Start date')) setError('')
-  }
-
-  const handleMonthsChange = (val: string) => {
-    const prevMin = Math.round(500 * parseFloat(months || '1'))
-    const newMin = Math.round(500 * parseFloat(val || '1'))
-    setMonths(val); sd({ months: val })
-    const currentFees = parseFloat(finalFees)
-    if (isNaN(currentFees) || currentFees === prevMin) {
-      setFinalFees(newMin.toString()); setFeesSubmitted(newMin.toString())
-      sd({ finalFees: newMin.toString(), feesSubmitted: newMin.toString() })
-      if (error.startsWith('Minimum fees')) setError('')
-    } else if (currentFees < newMin) {
-      setError(`Minimum fees for ${val} month(s) is ₹${newMin}`)
-    } else if (error.startsWith('Minimum fees')) { setError('') }
-  }
-
-  const handleFeesChange = (val: string) => {
-    setFinalFees(val); setFeesSubmitted(val); sd({ finalFees: val, feesSubmitted: val })
-    const parsed = parseFloat(val)
-    const currentMin = Math.round(500 * parseFloat(months || '1'))
-    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    else if (error.startsWith('Minimum fees')) setError('')
-  }
-
-  const toggleShift = (shift: string) => {
-    setSelectedShifts(prev => {
-      const next = prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift]
-      sd({ selectedShifts: next }); return next
-    })
-  }
-
-  const handleSubmit = async () => {
-    setError('')
-    setWarning('')
-    if (!name.trim() || name.trim().length < 2) { setError('Name must be at least 2 characters.'); return }
-    if (mobile.length !== 10) { setError('Mobile number must be exactly 10 digits.'); return }
-    if (mobileError === 'exists') { setError('This mobile is already registered. View the student card above.'); return }
-    if (!gender) { setError('Please select a gender.'); return }
-    if (!dob) { setError('Date of birth is required.'); return }
-    if (new Date(dob) >= new Date()) { setError('Date of birth must be in the past.'); return }
-    if (aadhar && aadhar.replace(/\D/g, '').length !== 12) { setError('Aadhar number must be 12 digits.'); return }
-    if (!startDate) { setError('Start date is required.'); return }
-    if (isDateOlderThan20Days(startDate)) {
-      if (!isAdmin) { setError('Start date cannot be older than 20 days.'); return }
-      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
-    }
-    if (!months || parseFloat(months) < 1) { setError('Months must be at least 1.'); return }
-    const seatNum = parseInt(seat)
-    if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92.'); return }
-    if (selectedShifts.length === 0) { setError('Please select at least one shift.'); return }
-    if (!finalFees || parseFloat(finalFees) < minFees) {
-      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
-      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
-    }
-    if (!feesSubmitted) { setError('Fees Submitted is required.'); return }
-    if (!regId) { setError('Register ID not loaded yet. Please wait.'); return }
-    if (!photoVerified || !photoUrl) { setError('Please verify the student photo before submitting.'); return }
-
-    setSaving(true)
-    const payload = {
-      timestamp: now, name: name.trim(), mobile_number: mobile,
-      admission: 'New', address: address.trim() || null, gender,
-      date_of_birth: dob || null, aadhar_number: aadhar.replace(/\D/g, '') || null,
-      photo: photoUrl,
-      start_date: startDate, months: parseFloat(months),
-      seat: seat.toString(), shift: selectedShifts.join(', '),
-      final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
-      mode, register_id: regId, comment: comment.trim() || null, created_by: userName,
+    const amt = parseFloat(amount)
+    const entries: { amount: number; type: string; description: string; created_by: string }[] = []
+    entries.push({ amount: amt, type, description: description.trim(), created_by: userName })
+    if (type === 'Cr' && goesToBank === true) {
+      entries.push({ amount: amt, type: 'Dr', description: 'Bank', created_by: userName })
     }
 
     const { error: insertError } = await supabase
-      .schema('library_management').from('admission_responses').insert([payload])
+      .schema('library_management')
+      .from('cash_log')
+      .insert(entries)
+
     if (insertError) { setError(insertError.message); setSaving(false); return }
-
-    pingAppsScript()
-    clearDraft()
-    pollingRef.current?.stop()
-    onSuccess()
-    onClose()
-  }
-
-  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
-  const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
-  const errorInputStyle: React.CSSProperties = { ...inputStyle, border: '1px solid #fca5a5' }
-  const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
-  const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
-
-  // ── Photo section (unchanged internals, same as original) ──────────────────
-  const PhotoSection = () => {
-    if (photoVerified) {
-      return (
-        <div className="rounded-2xl p-4 mb-2" style={{ background: '#f0fdf4', border: '1px solid #86efac' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0" style={{ border: '2px solid #86efac' }}>
-              {photoPreviewUrl
-                ? <img src={photoPreviewUrl} alt="Student" className="w-full h-full object-cover"
-                    onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                : <div className="w-full h-full flex items-center justify-center text-2xl" style={{ background: '#dcfce7' }}>📷</div>
-              }
-            </div>
-            <div className="flex-1">
-              <p className="text-xs font-semibold" style={{ color: '#166534' }}>✓ Photo verified</p>
-              <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>Linked to Register ID {regId}</p>
-              <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✅ All fields are now unlocked</p>
-            </div>
-            <button
-              onClick={() => {
-                pollingRef.current?.stop()
-                setPhotoVerified(false); setPhotoUrl(''); setPhotoPreviewUrl('')
-                setPhotoPhase('idle'); setPhotoError('')
-              }}
-              className="text-xs px-2.5 py-1 rounded-lg"
-              style={{ color: '#dc2626', border: '1px solid #fca5a5', background: '#fff' }}>
-              Re-upload
-            </button>
-          </div>
-        </div>
-      )
-    }
-
-    if (photoPhase === 'countdown') {
-      return (
-        <div className="rounded-2xl p-4 mb-2" style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: T.accent }}>
-              <span className="text-white text-sm font-bold">{photoCountdown}</span>
-            </div>
-            <div>
-              <p className="text-xs font-semibold" style={{ color: T.text }}>Waiting for upload…</p>
-              <p className="text-[10px]" style={{ color: T.textMuted }}>Upload the photo in the new tab, checking in {photoCountdown}s</p>
-            </div>
-          </div>
-          <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: T.accentBorder }}>
-            <div className="h-full rounded-full transition-all duration-1000"
-              style={{ width: `${((30 - photoCountdown) / 30) * 100}%`, background: T.accent }} />
-          </div>
-        </div>
-      )
-    }
-
-    if (photoPhase === 'polling') {
-      return (
-        <div className="rounded-2xl p-4 mb-2" style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-              style={{ background: T.surface, border: `2px solid ${T.accent}` }}>
-              <span className="text-sm font-bold" style={{ color: T.accent }}>{pollCountdown}</span>
-            </div>
-            <div>
-              <p className="text-xs font-semibold" style={{ color: T.text }}>Checking for photo…</p>
-              <p className="text-[10px]" style={{ color: T.textMuted }}>Next check in {pollCountdown}s</p>
-            </div>
-            <div className="ml-auto">
-              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24" style={{ color: T.accent }}>
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    return (
-      <div className="rounded-2xl p-4 mb-2" style={{
-        background: photoPhase === 'failed' ? '#fef2f2' : T.accentLight,
-        border: `1px solid ${photoPhase === 'failed' ? '#fecaca' : T.accentBorder}`,
-      }}>
-        <p className="text-xs mb-3 font-medium" style={{ color: T.text }}>
-          {photoPhase === 'failed'
-            ? '⚠️ Photo not found after 3 minutes. Re-upload or verify manually if already uploaded.'
-            : '📸 Upload the student photo — the rest of the form unlocks after verification.'}
-        </p>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={openPhotoForm} disabled={regIdLoading || !regId}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-            style={{ background: T.accent, color: 'white' }}>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-            Open Upload Form ↗
-          </button>
-          <button onClick={instantVerify} disabled={regIdLoading || !regId || instantChecking}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-            style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-            {instantChecking
-              ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-              : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-            }
-            {instantChecking ? 'Checking…' : 'Already Uploaded? Verify'}
-          </button>
-        </div>
-        {photoError && <p className="text-xs mt-2.5 font-medium" style={{ color: '#dc2626' }}>{photoError}</p>}
-      </div>
-    )
+    onSuccess(); onClose()
   }
 
   return (
-    <ModalShell onBackdropClick={onClose}>
-      <div className="h-[3px] rounded-t-2xl shrink-0"
-        style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }} />
-      <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
-        <div className="w-10 h-1 rounded-full" style={{ background: T.border }} />
-      </div>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      style={{
+        background: 'rgba(28,25,23,0.55)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+      <div
+        className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        <div className="h-[3px] rounded-t-2xl"
+          style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6"
-        style={{ WebkitOverflowScrolling: 'touch' as any }}>
-
-        {/* Header */}
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>New Admission</h2>
-            <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>Verify mobile → upload photo → fill details</p>
-          </div>
-          <button onClick={onClose} className="text-xl p-1" style={{ color: T.textMuted }}>✕</button>
+        <div className="flex justify-center pt-3 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
         </div>
 
-        {/* Draft banner */}
-        {Object.keys(draft).length > 0 && (
-          <div className="mb-4 px-3 py-2 rounded-xl flex items-center justify-between"
-            style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
-            <p className="text-[10px]" style={{ color: T.accent }}>📝 Draft restored from your last session</p>
-            <button onClick={() => { clearDraft(); onClose() }}
-              className="text-[10px] underline ml-2" style={{ color: T.textMuted }}>
-              Discard
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+                Add Cash Entry
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>
+                Cr = cash received · Dr = cash going out
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="flex items-center justify-center w-11 h-11 rounded-full"
+              style={{ color: T.textMuted, touchAction: 'manipulation' }}>
+              ✕
             </button>
           </div>
-        )}
 
-        {/* Timestamp */}
-        <div className="mb-4 px-3 py-2.5 rounded-xl text-xs" style={readonlyStyle}>
-          🕐 {new Date(now).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-        </div>
-
-        {/* Register ID */}
-        <div className="mb-4">
-          <label className={labelCls} style={{ color: T.textSub }}>Register ID</label>
-          <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>
-            {regIdLoading
-              ? <span className="animate-pulse text-xs">Fetching…</span>
-              : <span className="font-semibold" style={{ color: T.text }}>{regId || '—'}</span>}
-          </div>
-        </div>
-
-        {/* ═══════════════════════════════════════════════════
-            STEP 1 — Mobile Number (always visible, always editable)
-        ═══════════════════════════════════════════════════ */}
-        <SectionLabel>📱 Step 1 — Verify Mobile Number</SectionLabel>
-
-        <div className="mb-4">
-          <label className={labelCls} style={{ color: T.textSub }}>Mobile Number *</label>
-          <input
-            type="tel"
-            value={mobile}
-            onChange={(e) => handleMobileChange(e.target.value)}
-            placeholder="10-digit mobile"
-            maxLength={10}
-            className={inputCls}
-            style={existingStudent ? errorInputStyle : inputStyle}
-          />
-
-          {/* ✅ Available */}
-          {mobile.length === 10 && !existingStudent && (
-            <p className="text-[10px] mt-1.5 font-semibold" style={{ color: '#166534' }}>
-              ✅ Mobile number is available — proceed to upload photo
-            </p>
-          )}
-
-          {/* ❌ Duplicate — show existing student card */}
-          {existingStudent && (
-            <div className="mt-2">
-              <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: T.textMuted }}>
-                Number already registered for:
-              </p>
-              <Link
-                href={`/student/${existingStudent.mobile_number}`}
-                onClick={() => { clearDraft(); onClose() }}
-                className="flex items-center gap-3 p-3 rounded-xl"
-                style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, textDecoration: 'none' }}>
-                <div className="relative shrink-0">
-                  <img
-                    src={getProxyUrl(existingStudent.image_url) || '/default-avatar.png'}
-                    onError={(e) => { e.currentTarget.src = '/default-avatar.png' }}
-                    className="w-10 h-10 rounded-lg object-cover"
-                    style={{ border: `1px solid ${T.border}` }} />
-                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2"
-                    style={{
-                      borderColor: T.surface,
-                      background: existingStudent.status?.includes('Active') ? '#16a34a'
-                        : existingStudent.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
-                        : existingStudent.status?.toLowerCase().includes('blocked') ? '#9ca3af'
-                        : '#dc2626',
-                    }} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate" style={{ color: T.text }}>{existingStudent.name}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: T.textMuted }}>{existingStudent.mobile_number}</p>
-                  <div className="mt-1">
-                    <StatusBadge status={existingStudent.status} />
-                  </div>
-                </div>
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                  strokeWidth={2} style={{ color: T.accent }}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-              <p className="text-[10px] mt-1.5 font-medium" style={{ color: '#991b1b' }}>
-                ❌ Duplicate number — photo upload is blocked. Use a different mobile number.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* ═══════════════════════════════════════════════════
-            STEP 2 — Photo Upload (locked until mobile is valid & unique)
-        ═══════════════════════════════════════════════════ */}
-        <SectionLabel>📸 Step 2 — Upload Photo</SectionLabel>
-
-        {!mobileOk ? (
-          <div className="mt-1 mb-4 px-4 py-3 rounded-xl text-center text-xs font-medium"
-            style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
-            🔒 {mobile.length < 10
-              ? 'Enter a valid 10-digit mobile number to unlock photo upload'
-              : 'Duplicate mobile number — enter a unique number to unlock photo upload'}
-          </div>
-        ) : (
-          <PhotoSection />
-        )}
-
-        {/* ═══════════════════════════════════════════════════
-            STEP 3 — Rest of form (locked until photo verified)
-        ═══════════════════════════════════════════════════ */}
-        {mobileOk && fieldsLocked && (
-          <div className="mt-3 mb-1 px-4 py-3 rounded-xl text-center text-xs font-medium"
-            style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
-            🔒 Verify photo above to unlock the rest of the form
-          </div>
-        )}
-
-        <div style={{
-          opacity: fieldsLocked ? 0.35 : 1,
-          pointerEvents: fieldsLocked ? 'none' : 'auto',
-          transition: 'opacity 0.35s ease',
-        }}>
-          <SectionLabel>👤 Personal Details</SectionLabel>
-
-          {/* Full Name */}
           <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
+            <label className={labelCls} style={{ color: T.textSub }}>Entry Type</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['Cr', 'Dr'] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => { setType(t); setGoesToBank(null) }}
+                  className="min-h-[44px] px-3 rounded-xl text-sm font-semibold transition-all"
+                  style={{
+                    background: type === t ? (t === 'Cr' ? '#f0fdf4' : '#fef2f2') : T.bg,
+                    border: `1px solid ${type === t ? (t === 'Cr' ? '#86efac' : '#fca5a5') : T.border}`,
+                    color: type === t ? (t === 'Cr' ? '#166534' : '#dc2626') : T.textSub,
+                    touchAction: 'manipulation',
+                  }}>
+                  {t === 'Cr' ? '📥 Credit (Cash In)' : '📤 Debit (Cash Out)'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Amount (₹)</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              min="1"
+              className={`${inputCls} ${inputHCls}`}
+              style={inputBaseStyle}/>
+          </div>
+
+          <div className="mb-4">
+            <label className={labelCls} style={{ color: T.textSub }}>Description</label>
             <input
               type="text"
-              value={name}
-              onChange={(e) => { setName(e.target.value); sd({ name: e.target.value }) }}
-              onBlur={handleNameBlur}
-              placeholder="Enter full name"
-              className={inputCls}
-              style={inputStyle}
-            />
-            {name.trim() && toTitleCase(name) !== name && (
-              <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
-                Will save as: <span className="font-semibold" style={{ color: T.text }}>{toTitleCase(name)}</span>
-              </p>
-            )}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={type === 'Cr' ? 'e.g. Daily collection, Fees received…' : 'e.g. Petty cash, Staff expense…'}
+              className={`${inputCls} ${inputHCls}`}
+              style={inputBaseStyle}/>
           </div>
 
-          {/* NOTE: Mobile number field intentionally removed here — it lives in Step 1 above */}
-
-          {/* Address */}
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Address</label>
-            <input type="text" value={address}
-              onChange={(e) => { setAddress(e.target.value); sd({ address: e.target.value }) }}
-              placeholder="Optional" className={inputCls} style={inputStyle} />
-          </div>
-
-          {/* Gender + DOB */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
-              <select value={gender} onChange={(e) => { setGender(e.target.value); sd({ gender: e.target.value }) }}
-                className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="">Select</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
+          {type === 'Cr' && (
+            <div className="mb-5">
+              <label className={labelCls} style={{ color: T.textSub }}>Will this amount go to the bank?</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[true, false].map((val) => (
+                  <button
+                    key={String(val)}
+                    onClick={() => setGoesToBank(val)}
+                    className="min-h-[44px] px-3 rounded-xl text-sm font-semibold transition-all"
+                    style={{
+                      background: goesToBank === val ? (val ? '#eff6ff' : T.bg) : T.bg,
+                      border: `1px solid ${goesToBank === val ? (val ? '#bfdbfe' : T.borderHover) : T.border}`,
+                      color: goesToBank === val ? (val ? '#1d4ed8' : T.text) : T.textSub,
+                      touchAction: 'manipulation',
+                    }}>
+                    {val ? '🏦 Yes, to bank' : '✋ No, stays out'}
+                  </button>
+                ))}
+              </div>
+              {goesToBank === true && (
+                <p className="text-[10px] mt-2 px-3 py-2 rounded-xl"
+                  style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>
+                  Two entries will be recorded: one for this debit and one marking it as banked.
+                </p>
+              )}
             </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Date of Birth *</label>
-              <input type="date" value={dob}
-                onChange={(e) => { setDob(e.target.value); sd({ dob: e.target.value }) }}
-                className={inputCls} style={inputStyle} />
+          )}
+
+          {error && (
+            <div className="mb-4 px-4 py-2.5 rounded-xl"
+              style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+              <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
             </div>
-          </div>
+          )}
 
-          {/* Aadhar */}
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Aadhar Number (optional)</label>
-            <input type="text" value={aadhar} maxLength={14}
-              onChange={(e) => { setAadhar(e.target.value); sd({ aadhar: e.target.value }) }}
-              placeholder="12-digit aadhar" className={inputCls} style={inputStyle} />
-          </div>
-
-          <SectionLabel>📋 Admission Details</SectionLabel>
-
-          {/* Start Date */}
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-            <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
-              className={inputCls} style={inputStyle} />
-          </div>
-
-          {/* Months + Seat */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
-                min="1" className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)}
-                min="0" max="92" className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-
-          {/* Shift */}
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
-            <div className="space-y-2">
-              {SHIFTS.map((shift) => {
-                const checked = selectedShifts.includes(shift)
-                return (
-                  <label key={shift} className="flex items-center gap-3 p-3 rounded-xl cursor-pointer"
-                    style={{ background: checked ? T.accentLight : T.bg, border: `1px solid ${checked ? T.accentBorder : T.border}` }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleShift(shift)} className="hidden" />
-                    <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                      style={{ background: checked ? T.accent : 'transparent', border: `2px solid ${checked ? T.accent : T.borderHover}` }}>
-                      {checked && <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </div>
-                    <span className="text-sm" style={{ color: checked ? T.text : T.textSub }}>{shift}</span>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Fees */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>
-                Final Fees *
-                {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
-              </label>
-              <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
-                className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)}
-                className={inputCls} style={inputStyle} />
-            </div>
-          </div>
-
-          {/* Payment Mode + Admission type */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value)}
-                className={inputCls + ' appearance-none'} style={inputStyle}>
-                <option value="Cash">Cash</option>
-                <option value="Online">Online</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Admission</label>
-              <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>New</div>
-            </div>
-          </div>
-
-          {/* Comment */}
-          <div className="mb-4">
-            <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-              placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
-          </div>
-
-          {/* Created By */}
-          <div className="mb-2">
-            <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
-            <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 min-h-[48px] rounded-xl text-sm"
+              style={{ border: `1px solid ${T.border}`, color: T.textSub, touchAction: 'manipulation' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={saving}
+              className="flex-1 min-h-[48px] rounded-xl text-sm font-semibold disabled:opacity-40"
+              style={{ background: T.accent, color: 'white', touchAction: 'manipulation' }}>
+              {saving
+                ? <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Saving…
+                  </span>
+                : '✓ Add Entry'}
+            </button>
           </div>
         </div>
-
-        {/* Warnings & Errors */}
-        {warning && (
-          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
-            <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
-          </div>
-        )}
-        {error && (
-          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
-            <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
-          </div>
-        )}
       </div>
+    </div>
+  )
+}
 
-      {/* Footer buttons */}
-      <div className="shrink-0 flex gap-3 p-4 pt-3"
-        style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-          style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-        <button onClick={handleSubmit} disabled={saving || regIdLoading}
-          className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-          style={{ background: T.accent, color: 'white' }}>
-          {saving
-            ? <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
-                Saving…
-              </span>
-            : '✓ Confirm Admission'}
-        </button>
-      </div>
-    </ModalShell>
+function localMidnight(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d, 0, 0, 0, 0)
+}
+function toDateInput(date: Date): string {
+  return date.toISOString().split('T')[0]
+}
+
+// ─── COLLAPSIBLE TABLE WRAPPER ────────────────────────────────────────────────
+function CollapsibleTable({ toggleLabel, open, onToggle, children }: {
+  toggleLabel: React.ReactNode
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="mb-6">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-left transition-all"
+        style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          touchAction: 'manipulation',
+          minHeight: '52px',
+        }}>
+        <div className="flex items-center gap-2 flex-wrap min-w-0 pr-2">
+          {toggleLabel}
+        </div>
+        <span className="ml-2 shrink-0 text-sm" style={{ color: T.textMuted }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="mt-2 rounded-2xl overflow-hidden"
+          style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+          {children}
+        </div>
+      )}
+    </div>
   )
 }
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
-export default function Home() {
+export default function AdminLedgerPage() {
   const router = useRouter()
-  const [, startTransition] = useTransition()
 
-  const scrollRestoredRef = useRef(false)
-  const lastFetchRef = useRef<number>(0)
+  const [loading, setLoading]             = useState(true)
+  const [userName, setUserName]           = useState('')
+  const [showCashModal, setShowCashModal] = useState(false)
+  const [view, setView]                   = useState<'glance' | 'detailed'>('glance')
 
-  const [students, setStudents] = useState<any[]>([])
+  const [showCashLog, setShowCashLog]     = useState(false)
+  const [showAdmTable, setShowAdmTable]   = useState(false)
+  const [showExpTable, setShowExpTable]   = useState(false)
 
-  // ── FIX: Start with safe defaults — sessionStorage restored in useEffect after mount ──
-  const [search, setSearch] = useState('')
-  const [searchInput, setSearchInput] = useState('')
-  const [filter, setFilter] = useState('active')
-  const [selectedCard, setSelectedCard] = useState('active')
+  const [admissionFees, setAdmissionFees] = useState<any[]>([])
+  const [dueFees, setDueFees]             = useState<any[]>([])
+  const [expenses, setExpenses]           = useState<any[]>([])
+  const [cashLog, setCashLog]             = useState<any[]>([])
+  const [admissions, setAdmissions]       = useState<any[]>([])
+  const [expensesTable, setExpensesTable] = useState<any[]>([])
 
-  const [loading, setLoading] = useState(true)
-  const [userName, setUserName] = useState('')
-  const [role, setRole] = useState('')
-  const [bulkMode, setBulkMode] = useState(false)
-  const [selectedMobiles, setSelectedMobiles] = useState<Set<string>>(new Set())
-  const [bulkLoading, setBulkLoading] = useState(false)
-  const [renewStudent, setRenewStudent] = useState<any | null>(null)
-  const [showNewAdmission, setShowNewAdmission] = useState(false)
+  const [admStartDate, setAdmStartDate]   = useState('')
+  const [expStartDate, setExpStartDate]   = useState('')
 
-  const [confirmModal, setConfirmModal] = useState<{
-    message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
-  } | null>(null)
-
-  // ── FIX: Restore sessionStorage values safely after mount (avoids hydration mismatch) ──
-  useEffect(() => {
-    try {
-      const savedFilter = sessionStorage.getItem('dashboard_filter') || 'active'
-      const savedSearch = sessionStorage.getItem('dashboard_search') || ''
-      setFilter(savedFilter)
-      setSelectedCard(savedFilter)
-      setSearch(savedSearch)
-      setSearchInput(savedSearch)
-      const hasDraft = (() => {
-        try { const d = sessionStorage.getItem('new_admission_draft'); return !!d && Object.keys(JSON.parse(d)).length > 0 } catch { return false }
-      })()
-      setShowNewAdmission(hasDraft)
-    } catch {}
-  }, [])
+  const [realBankBalance, setRealBankBalance]   = useState('0')
+  const [extraPaid, setExtraPaid]               = useState('0')
+  const [extraPaidComment, setExtraPaidComment] = useState('')
+  const [extraPaidPerson, setExtraPaidPerson]   = useState('')
+  const [notes, setNotes]                       = useState('')
+  const [savingConfig, setSavingConfig]         = useState(false)
+  const [configSaved, setConfigSaved]           = useState(false)
 
   useEffect(() => {
-    let profileFetched = false
-
-    const fetchProfile = async (userId: string) => {
-      if (profileFetched) return
-      profileFetched = true
-      const { data: profile } = await supabase.from('profiles').select('name, role').eq('id', userId).single()
+    const init = async () => {
+      const { data: sessionData } = await supabase.auth.getSession()
+      if (!sessionData.session) { router.push('/login'); return }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name, role')
+        .eq('id', sessionData.session.user.id)
+        .single()
+      if (profile?.role !== 'admin') { router.push('/'); return }
       setUserName(profile?.name || '')
-      setRole(profile?.role || '')
-      fetchStudents()
+      await fetchAll()
+      setLoading(false)
+    }
+    init()
+  }, [])
+
+  async function fetchAllRows<T>(
+    table: string, columns: string,
+    orderBy?: { column: string; ascending: boolean }
+  ): Promise<T[]> {
+    const PAGE_SIZE = 1000
+    let allRows: T[] = [], from = 0
+    while (true) {
+      let query = supabase
+        .schema('library_management')
+        .from(table).select(columns)
+        .range(from, from + PAGE_SIZE - 1)
+      if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending })
+      const { data, error } = await query
+      if (error) throw new Error(`${table}: ${error.message}`)
+      allRows = allRows.concat((data as T[]) || [])
+      if (!data || data.length < PAGE_SIZE) break
+      from += PAGE_SIZE
+    }
+    return allRows
+  }
+
+  async function fetchAllRowsView<T>(
+    view: string, columns: string,
+    orderBy?: { column: string; ascending: boolean }
+  ): Promise<T[]> {
+    const PAGE_SIZE = 1000
+    let allRows: T[] = [], from = 0
+    while (true) {
+      let query = supabase.from(view).select(columns).range(from, from + PAGE_SIZE - 1)
+      if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending })
+      const { data, error } = await query
+      if (error) throw new Error(`${view}: ${error.message}`)
+      allRows = allRows.concat((data as T[]) || [])
+      if (!data || data.length < PAGE_SIZE) break
+      from += PAGE_SIZE
+    }
+    return allRows
+  }
+
+  async function fetchAll() {
+    const [admRows, dueRows, expRows, cashRows, cfgRows, admissionRows, expTableRows] = await Promise.all([
+      fetchAllRows<any>('admission_responses', 'fees_submitted, mode'),
+      fetchAllRows<any>('due_submission', 'due_fees_submitted, due_fees_mode'),
+      fetchAllRows<any>('expenses', 'Amount, Mode'),
+      fetchAllRows<any>('cash_log', '*', { column: 'created_at', ascending: false }),
+      fetchAllRows<any>('ledger_config', '*'),
+      fetchAllRowsView<any>('v_admission_details', '*', { column: 'timestamp', ascending: false }),
+      fetchAllRows<any>('expenses', '*', { column: 'created_at', ascending: false }),
+    ])
+
+    setAdmissionFees(admRows); setDueFees(dueRows); setExpenses(expRows)
+    setCashLog(cashRows); setAdmissions(admissionRows); setExpensesTable(expTableRows)
+
+    const maxCashDate = cashRows.length > 0
+      ? cashRows.reduce((max: string, r: any) => r.created_at > max ? r.created_at : max, cashRows[0].created_at)
+      : ''
+    if (maxCashDate) {
+      const lastDate = new Date(maxCashDate)
+      lastDate.setDate(lastDate.getDate() + 1)
+      const d = toDateInput(lastDate)
+      setAdmStartDate(d); setExpStartDate(d)
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) fetchProfile(data.session.user.id)
-    })
+    const c = cfgRows?.[0]
+    if (c) {
+      setRealBankBalance(c.real_bank_balance?.toString() || '0')
+      setExtraPaid(c.extra_paid?.toString() || '0')
+      setExtraPaidComment(c.extra_paid_comment || '')
+      setExtraPaidPerson(c.extra_paid_person || '')
+      setNotes(c.notes || '')
+    }
+  }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        fetchProfile(session.user.id)
-      } else if (event === 'SIGNED_OUT') {
-        router.push('/login')
-      } else if (event === 'INITIAL_SESSION' && !session) {
-        router.push('/login')
+  const m = useMemo(() => {
+    const cashFees =
+      admissionFees.filter(r => r.mode === 'Cash').reduce((s, r) => s + (Number(r.fees_submitted) || 0), 0) +
+      dueFees.filter(r => r.due_fees_mode === 'Cash').reduce((s, r) => s + (Number(r.due_fees_submitted) || 0), 0)
+    const onlineFees =
+      admissionFees.filter(r => r.mode === 'Online').reduce((s, r) => s + (Number(r.fees_submitted) || 0), 0) +
+      dueFees.filter(r => r.due_fees_mode === 'Online').reduce((s, r) => s + (Number(r.due_fees_submitted) || 0), 0)
+    const totalFees = cashFees + onlineFees
+
+    const cashExpenses   = expenses.filter(r => r.Mode === 'Cash').reduce((s, r) => s + (r.Amount || 0), 0)
+    const onlineExpenses = expenses.filter(r => r.Mode === 'Online').reduce((s, r) => s + (r.Amount || 0), 0)
+    const totalExpenses  = cashExpenses + onlineExpenses
+
+    const netProfit    = LAST_NET + totalFees - totalExpenses
+    const cashReceived = cashLog.filter(r => r.type === 'Cr').reduce((s, r) => s + (r.amount || 0), 0)
+    const cashDebited  = cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0)
+    const cashBanked   = cashLog.filter(r => r.type === 'Dr' && r.description === 'Bank').reduce((s, r) => s + (r.amount || 0), 0)
+    const cashInHand   = cashReceived - cashDebited
+
+    const expectedBankBalance = LAST_BANK_BALANCE + cashBanked + onlineFees - onlineExpenses
+    const remainingToCollect  = netProfit - cashInHand - expectedBankBalance
+
+    const realBank     = parseFloat(realBankBalance) || 0
+    const extraPaidAmt = parseFloat(extraPaid) || 0
+    const bankError    = realBank - expectedBankBalance
+    const stillToCheck = bankError - extraPaidAmt
+
+    return {
+      cashFees, onlineFees, totalFees,
+      cashExpenses, onlineExpenses, totalExpenses,
+      netProfit, cashReceived, cashBanked, cashInHand,
+      expectedBankBalance, remainingToCollect, bankError, stillToCheck,
+    }
+  }, [admissionFees, dueFees, expenses, cashLog, realBankBalance, extraPaid])
+
+  const filteredAdmissions = useMemo(() => {
+    if (!admStartDate) return admissions
+    const from = localMidnight(admStartDate)
+    return admissions.filter(r => {
+      const ts  = r.timestamp ? new Date(r.timestamp) : null
+      const due = r.due_fees_submitted_date ? new Date(r.due_fees_submitted_date) : null
+      return (ts && ts >= from) || (due && due >= from)
+    })
+  }, [admissions, admStartDate])
+
+  const admSummary = useMemo(() => {
+    let totalPaid = 0, cashPaid = 0, onlinePaid = 0
+    let totalDuePaid = 0, cashDuePaid = 0, onlineDuePaid = 0
+    let totalDue = 0
+    filteredAdmissions.forEach(r => {
+      const paid = r.fees_submitted || 0
+      totalPaid += paid
+      if ((r.mode || '').toLowerCase() === 'cash')   cashPaid += paid
+      if ((r.mode || '').toLowerCase() === 'online') onlinePaid += paid
+      const duePaid = r.due_fees_submitted || 0
+      if (duePaid > 0) {
+        totalDuePaid += duePaid
+        if ((r.due_fees_mode || '').toLowerCase() === 'cash')   cashDuePaid += duePaid
+        if ((r.due_fees_mode || '').toLowerCase() === 'online') onlineDuePaid += duePaid
       }
+      totalDue += r.due_fees || 0
     })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    const t = setTimeout(() => startTransition(() => setSearch(searchInput)), 300)
-    return () => clearTimeout(t)
-  }, [searchInput])
-
-  useEffect(() => { sessionStorage.setItem('dashboard_filter', filter) }, [filter])
-  useEffect(() => { sessionStorage.setItem('dashboard_search', searchInput) }, [searchInput])
-
-  useEffect(() => {
-    const handleScroll = () => { sessionStorage.setItem('dashboard_scroll', String(window.scrollY)) }
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        const now = Date.now()
-        if (now - lastFetchRef.current > 2 * 60 * 1000) {
-          cachedStudents = null
-          fetchStudents(true)
-        }
-      }
+    return {
+      count: filteredAdmissions.length,
+      totalCollected: totalPaid + totalDuePaid,
+      cashCollected: cashPaid + cashDuePaid,
+      onlineCollected: onlinePaid + onlineDuePaid,
+      totalDue,
     }
-    document.addEventListener('visibilitychange', handleVisibility)
-    return () => document.removeEventListener('visibilitychange', handleVisibility)
-  }, [])
+  }, [filteredAdmissions])
 
-  useEffect(() => { setBulkMode(false); setSelectedMobiles(new Set()) }, [filter])
+  const filteredExpenses = useMemo(() => {
+    if (!expStartDate) return expensesTable
+    const from = localMidnight(expStartDate)
+    return expensesTable.filter(r => r.created_at && new Date(r.created_at) >= from)
+  }, [expensesTable, expStartDate])
 
-  async function fetchStudents(invalidate = false) {
-    if (!invalidate && cachedStudents) { setStudents(cachedStudents); setLoading(false); return }
-    setLoading(true)
-    lastFetchRef.current = Date.now()
-    const { data, error } = await supabase.from('v_student_summary').select('*')
-    if (!error) { setStudents(data || []); cachedStudents = data }
-    setLoading(false)
-    if (!scrollRestoredRef.current) {
-      scrollRestoredRef.current = true
-      try {
-        const savedScroll = parseInt(sessionStorage.getItem('dashboard_scroll') || '0', 10)
-        if (savedScroll > 0) requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }))
-      } catch {}
-    }
-  }
-
-  const filtered = useMemo(() => {
-    const result = students.filter((s) => {
-      const matchSearch = s.name?.toLowerCase().includes(search.toLowerCase()) || s.mobile_number?.includes(search)
-      if (filter === 'all') return matchSearch
-      if (filter === 'frozen') return matchSearch && s.status?.toLowerCase().includes('freeze')
-      return matchSearch && s.status?.toLowerCase().includes(filter)
+  const expSummary = useMemo(() => {
+    let total = 0, cash = 0, online = 0
+    filteredExpenses.forEach(r => {
+      const amt = r.Amount || 0; total += amt
+      if (r.Mode === 'Cash') cash += amt
+      else if (r.Mode === 'Online') online += amt
     })
-    if (filter === 'expired') {
-      result.sort((a, b) => {
-        const da = a.latest_expiry ? new Date(a.latest_expiry).getTime() : 0
-        const db = b.latest_expiry ? new Date(b.latest_expiry).getTime() : 0
-        return db - da // most recently expired (e.g. expired today) comes first
+    return { total, cash, online, count: filteredExpenses.length }
+  }, [filteredExpenses])
+
+  async function saveConfig() {
+    setSavingConfig(true)
+    await supabase
+      .schema('library_management')
+      .from('ledger_config')
+      .update({
+        real_bank_balance:  parseFloat(realBankBalance) || 0,
+        extra_paid:         parseFloat(extraPaid) || 0,
+        extra_paid_comment: extraPaidComment || null,
+        extra_paid_person:  extraPaidPerson || null,
+        notes:              notes || null,
+        updated_by:         userName,
+        updated_at:         new Date().toISOString(),
       })
-    } else if (filter === 'active') {
-      result.sort((a, b) => {
-        const diffA = getExpiryDiffDays(a.latest_expiry)
-        const diffB = getExpiryDiffDays(b.latest_expiry)
-        const groupA = diffA !== null && diffA <= 7 ? 0 : 1 // 0 = yellow group, 1 = normal group
-        const groupB = diffB !== null && diffB <= 7 ? 0 : 1
-        if (groupA !== groupB) return groupA - groupB
-        const da = a.latest_expiry ? new Date(a.latest_expiry).getTime() : Infinity
-        const db = b.latest_expiry ? new Date(b.latest_expiry).getTime() : Infinity
-        return da - db // within each group, soonest-to-expire first
-      })
-    }
-    return result
-  }, [students, search, filter])
-
-  const stats = useMemo(() => ({
-    total: students.length,
-    active: students.filter(s => s.status?.includes('Active')).length,
-    expired: students.filter(s => s.status?.includes('Expired')).length,
-    due: students.filter(s => s.status?.includes('Due')).length,
-    blocked: students.filter(s => s.status?.toLowerCase().includes('blocked')).length,
-    frozen: students.filter(s => s.status?.toLowerCase().includes('freeze')).length,
-  }), [students])
-
-  const handleLogout = async () => { await supabase.auth.signOut(); router.push('/login') }
-
-  const toggleSelect = useCallback((mobile: string) => {
-    setSelectedMobiles(prev => { const next = new Set(prev); next.has(mobile) ? next.delete(mobile) : next.add(mobile); return next })
-  }, [])
-
-  const bulkBlockEligible = useMemo(() =>
-    filtered.filter(s => s.status?.toLowerCase().includes('expired') && !(s.total_due > 0)), [filtered])
-
-  const selectAll = () =>
-    setSelectedMobiles(new Set(filter === 'blocked' ? filtered.map(s => s.mobile_number) : bulkBlockEligible.map(s => s.mobile_number)))
-
-  const executeBulkBlock = async () => {
-    setBulkLoading(true)
-    for (const mobile of Array.from(selectedMobiles)) {
-      const { data: existing } = await supabase.schema('library_management').from('blocked').select('*').eq('mobile_number', mobile).maybeSingle()
-      if (!existing) await supabase.schema('library_management').from('blocked').insert([{ mobile_number: mobile, created_by: userName }])
-      else if (existing.is_unblocked) await supabase.schema('library_management').from('blocked').update({ is_unblocked: false, created_by: userName, created_at: new Date().toISOString(), unblocked_by: null }).eq('mobile_number', mobile)
-    }
-    setBulkLoading(false); setBulkMode(false); setSelectedMobiles(new Set())
-    cachedStudents = null; fetchStudents(true)
+      .eq('id', 1)
+    setSavingConfig(false); setConfigSaved(true)
+    setTimeout(() => setConfigSaved(false), 2500)
+    await fetchAll()
   }
 
-  const executeBulkUnblock = async () => {
-    setBulkLoading(true)
-    for (const mobile of Array.from(selectedMobiles)) {
-      const { data: existing } = await supabase.schema('library_management').from('blocked').select('*').eq('mobile_number', mobile).maybeSingle()
-      if (existing && !existing.is_unblocked) await supabase.schema('library_management').from('blocked').update({ is_unblocked: true, unblocked_by: userName }).eq('mobile_number', mobile)
-    }
-    setBulkLoading(false); setBulkMode(false); setSelectedMobiles(new Set())
-    cachedStudents = null; fetchStudents(true)
-  }
+  if (loading) return (
+    <div
+      className="flex items-center justify-center"
+      style={{ minHeight: '100dvh', background: T.bg }}>
+      <div className="text-center">
+        <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
+          style={{ borderColor: T.accent, borderTopColor: 'transparent' }}/>
+        <p className="text-sm" style={{ color: T.textMuted }}>Loading ledger…</p>
+      </div>
+    </div>
+  )
 
-  const handleBulkBlock = () => {
-    if (selectedMobiles.size === 0) return
-    setConfirmModal({
-      message: `Block ${selectedMobiles.size} student${selectedMobiles.size !== 1 ? 's' : ''}?`,
-      confirmLabel: `🔒 Block ${selectedMobiles.size}`,
-      danger: true,
-      onConfirm: () => { setConfirmModal(null); executeBulkBlock() },
-    })
-  }
+  const balanced  = (v: number) => Math.abs(v) < 1
+  const greenSet  = { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0' }
+  const redSet    = { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' }
+  const amberSet  = { color: '#92400e', bg: '#fefce8', border: '#fde68a' }
+  const blueSet   = { color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' }
 
-  const handleBulkUnblock = () => {
-    if (selectedMobiles.size === 0) return
-    setConfirmModal({
-      message: `Unblock ${selectedMobiles.size} student${selectedMobiles.size !== 1 ? 's' : ''}?`,
-      confirmLabel: `🔓 Unblock ${selectedMobiles.size}`,
-      danger: false,
-      onConfirm: () => { setConfirmModal(null); executeBulkUnblock() },
-    })
-  }
-
-  const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
-  const canSeeLedger = role === 'admin' || role === 'partner' || role === 'manager'
-  const showBulkBlock = isPrivileged && filter === 'expired'
-  const showBulkUnblock = isPrivileged && filter === 'blocked'
-
-  const CARDS = [
-    { key: 'active',  label: 'Active',  count: stats.active,  color: '#16a34a', lightBg: '#f0fdf4', border: '#bbf7d0' },
-    { key: 'expired', label: 'Expired', count: stats.expired, color: '#dc2626', lightBg: '#fef2f2', border: '#fecaca' },
-    { key: 'due',     label: 'Due',     count: stats.due,     color: '#d97706', lightBg: '#fffbeb', border: '#fde68a' },
-    { key: 'frozen',  label: 'Frozen',  count: stats.frozen,  color: '#0284c7', lightBg: '#f0f9ff', border: '#bae6fd' },
-    { key: 'blocked', label: 'Blocked', count: stats.blocked, color: '#6b7280', lightBg: '#f9fafb', border: '#e5e7eb' },
-    { key: 'all',     label: 'All',     count: stats.total,   color: T.accent,  lightBg: T.accentLight, border: T.accentBorder },
-  ]
+  const cfgInputStyle: React.CSSProperties = { ...inputBaseStyle }
 
   return (
-    <>
-      <div className="min-h-screen" style={{ background: T.bg }}>
-        <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }} />
+    <div
+      className="min-h-screen"
+      style={{
+        background: T.bg,
+        minHeight: '100dvh',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+      <div className="h-1 w-full"
+        style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }}/>
 
-        <div className="max-w-5xl mx-auto px-4 py-6 md:py-8">
+      <div className="max-w-5xl mx-auto px-4 py-6">
 
-          <div className="flex justify-between items-start mb-6 flex-wrap gap-3">
+        {/* ── HEADER ── */}
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="text-sm font-medium hover:opacity-70"
+              style={{ color: T.textSub, touchAction: 'manipulation' }}>
+              ← Home
+            </Link>
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold"
-                style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
-                📚 Knowledge Hub Library
+              <h1 className="text-lg md:text-2xl font-bold"
+                style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+                🏦 Admin Ledger
               </h1>
-              <p className="text-[10px] mt-1 tracking-[0.2em] uppercase font-medium" style={{ color: T.textMuted }}>Library Dashboard</p>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <Link href="/seatmap" className="px-3 py-2 rounded-xl text-xs font-medium"
-                style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                🗺️ Seat Map
-              </Link>
-
-              {isPrivileged && (
-                <>
-                  {canSeeLedger && (
-                    <Link href="/admissions" className="px-3 py-2 rounded-xl text-xs font-medium"
-                      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                      📋 Ledger
-                    </Link>
-                  )}
-                  {role === 'admin' && (
-                    <Link href="/admin_ledger" className="px-3 py-2 rounded-xl text-xs font-medium"
-                      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                      🏦 Admin Ledger
-                    </Link>
-                  )}
-                  <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
-                    style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
-                    💸 Expenses
-                  </Link>
-                  <NewAdmissionButton onClick={() => setShowNewAdmission(true)} />
-                </>
-              )}
-
-              <div className="flex items-center gap-2 ml-1">
-                <p className="text-sm font-semibold" style={{ color: T.text }}>{userName}</p>
-                <button onClick={handleLogout} className="px-3 py-1.5 rounded-lg text-xs font-medium border"
-                  style={{ color: '#dc2626', borderColor: '#fecaca', background: 'transparent' }}>
-                  Logout
-                </button>
-              </div>
+              <p className="text-[10px] mt-0.5 uppercase tracking-widest" style={{ color: T.textMuted }}>
+                All-time reconciliation · Admin only
+              </p>
             </div>
           </div>
 
-          {/* STAT CARDS */}
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
-            {CARDS.map(({ key, label, count, color, lightBg, border }) => {
-              const active = selectedCard === key
-              return (
-                <button key={key} onClick={() => { setSelectedCard(key); startTransition(() => setFilter(key)) }}
-                  className="rounded-2xl p-3 md:p-4 text-left relative overflow-hidden transition-all duration-150"
-                  style={{
-                    background: active ? lightBg : T.surface,
-                    border: `1px solid ${active ? border : T.border}`,
-                    transform: active ? 'scale(1.03)' : 'scale(1)',
-                    boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,0.05)',
-                  }}>
-                  {active && (
-                    <div className="absolute top-0 inset-x-0 h-[3px]"
-                      style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-                  )}
-                  <p className="text-[10px] font-semibold uppercase tracking-widest"
-                    style={{ color: active ? color : T.textMuted }}>{label}</p>
-                  <p className="text-2xl md:text-3xl font-bold mt-0.5"
-                    style={{ fontFamily: "'Georgia', serif", color: active ? color : T.text }}>{count}</p>
-                </button>
-              )
-            })}
-          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* View Toggle */}
+            <ViewToggle view={view} onChange={setView} />
 
-          {/* SEARCH + BULK CONTROLS */}
-          <div className="flex gap-3 mb-4 flex-wrap">
-            <input
-              type="text"
-              value={searchInput}
-              placeholder="Search by name or mobile…"
-              className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl focus:outline-none"
-              style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }}
-              onFocus={e => (e.currentTarget.style.borderColor = T.accent)}
-              onBlur={e => (e.currentTarget.style.borderColor = T.border)}
-              onChange={(e) => setSearchInput(e.target.value)} />
-            {showBulkBlock && (
-              <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium"
-                style={{
-                  background: bulkMode ? '#fee2e2' : '#fff1f2',
-                  border: `1px solid ${bulkMode ? '#fca5a5' : '#fecdd3'}`,
-                  color: '#dc2626',
-                }}>
-                {bulkMode ? '✕ Cancel' : '🔒 Bulk Block'}
-              </button>
-            )}
-            {showBulkUnblock && (
-              <button onClick={() => { setBulkMode(m => !m); setSelectedMobiles(new Set()) }}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium"
-                style={{
-                  background: bulkMode ? '#dcfce7' : '#f0fdf4',
-                  border: `1px solid ${bulkMode ? '#86efac' : '#bbf7d0'}`,
-                  color: '#16a34a',
-                }}>
-                {bulkMode ? '✕ Cancel' : '🔓 Bulk Unblock'}
-              </button>
-            )}
-          </div>
-
-          {/* BULK ACTION BAR */}
-          {bulkMode && (
-            <div className="mb-3 flex items-center gap-3 flex-wrap px-4 py-3 rounded-xl"
-              style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-              <span className="text-sm" style={{ color: T.textSub }}>{selectedMobiles.size} selected</span>
-              <button onClick={selectAll} className="text-xs font-medium hover:underline" style={{ color: T.accent }}>
-                Select All Eligible
-              </button>
-              <button onClick={() => setSelectedMobiles(new Set())} className="text-xs hover:underline" style={{ color: T.textMuted }}>
-                Clear
-              </button>
-              <div className="ml-auto flex gap-2">
-                {showBulkBlock && (
-                  <button onClick={handleBulkBlock} disabled={selectedMobiles.size === 0 || bulkLoading}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-                    style={{ background: '#dc2626', color: 'white' }}>
-                    {bulkLoading ? 'Blocking…' : `Block ${selectedMobiles.size}`}
-                  </button>
-                )}
-                {showBulkUnblock && (
-                  <button onClick={handleBulkUnblock} disabled={selectedMobiles.size === 0 || bulkLoading}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40"
-                    style={{ background: '#16a34a', color: 'white' }}>
-                    {bulkLoading ? 'Unblocking…' : `Unblock ${selectedMobiles.size}`}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-          {bulkMode && showBulkBlock && (
-            <p className="text-[10px] mb-3" style={{ color: T.textMuted }}>
-              ⚠️ Only expired students with no pending dues can be bulk blocked.
-            </p>
-          )}
-
-          {/* STUDENT LIST */}
-          {loading && (
-            <div className="text-center py-20">
-              <div className="inline-block w-6 h-6 border-2 rounded-full animate-spin mb-3"
-                style={{ borderColor: T.accent, borderTopColor: 'transparent' }} />
-              <p className="text-sm" style={{ color: T.textMuted }}>Loading students…</p>
-            </div>
-          )}
-          {!loading && filtered.length === 0 && (
-            <div className="text-center py-20">
-              <p className="text-5xl mb-3">🔍</p>
-              <p className="text-sm" style={{ color: T.textMuted }}>No students found</p>
-            </div>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-3">
-            {filtered.map((s) => {
-              const isEligibleForBulk = filter === 'blocked'
-                ? true
-                : (s.status?.toLowerCase().includes('expired') && !(s.total_due > 0))
-
-              const diffDays = getExpiryDiffDays(s.latest_expiry)
-              let highlight: 'yellow' | 'red' | null = null
-              if (diffDays !== null) {
-                if (filter === 'active' && diffDays <= 7) highlight = 'yellow'
-                else if (filter === 'expired') highlight = (-diffDays) <= 7 ? 'yellow' : 'red'
-              }
-
-              return (
-                <StudentCard
-                  key={s.mobile_number}
-                  s={s}
-                  selectable={bulkMode && isEligibleForBulk}
-                  selected={selectedMobiles.has(s.mobile_number)}
-                  onToggle={toggleSelect}
-                  onRenew={setRenewStudent}
-                  role={role}
-                  highlight={highlight} />
-              )
-            })}
+            <button
+              onClick={() => setShowCashModal(true)}
+              className="flex items-center gap-2 px-4 rounded-xl text-sm font-semibold"
+              style={{
+                background: T.accent, color: 'white',
+                boxShadow: `0 2px 12px ${T.accent}50`,
+                minHeight: '44px',
+                touchAction: 'manipulation',
+              }}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
+              </svg>
+              Cash Entry
+            </button>
           </div>
         </div>
+
+        {/* ══ GLANCE VIEW ══ */}
+        {view === 'glance' && (
+          <GlanceView m={m} balanced={balanced} />
+        )}
+
+        {/* ══ DETAILED VIEW ══ */}
+        {view === 'detailed' && (
+          <>
+            {/* ══ SECTION 1: REVENUE ══ */}
+            <Section title="Revenue — all-time fees collected">
+              <div className="grid grid-cols-3 gap-2 md:gap-3">
+                <MetricCard label="💵 Cash Fees"  value={fmt(m.cashFees)}   {...amberSet}/>
+                <MetricCard label="📱 Online Fees" value={fmt(m.onlineFees)} {...blueSet}/>
+                <MetricCard label="Total Fees"     value={fmt(m.totalFees)}  {...greenSet}/>
+              </div>
+            </Section>
+
+            {/* ══ SECTION 2: EXPENSES ══ */}
+            <Section title="Expenses — all-time">
+              <div className="grid grid-cols-3 gap-2 md:gap-3">
+                <MetricCard label="💵 Cash Exp"   value={fmt(m.cashExpenses)}   {...amberSet}/>
+                <MetricCard label="📱 Online Exp" value={fmt(m.onlineExpenses)} {...blueSet}/>
+                <MetricCard label="Total Exp"     value={fmt(m.totalExpenses)}  {...redSet}/>
+              </div>
+            </Section>
+
+            {/* ══ SECTION 3: NET PROFIT ══ */}
+            <Section title="Net Profit">
+              <div className="grid grid-cols-3 gap-2 md:gap-3">
+                <MetricCard label="Opening" value={fmt(LAST_NET)} color={T.textSub} sub="Constant"/>
+                <MetricCard
+                  label="Net Change"
+                  value={fmtSigned(m.totalFees - m.totalExpenses)}
+                  color={(m.totalFees - m.totalExpenses) >= 0 ? '#166534' : '#dc2626'}
+                  formula="Fees − Expenses"/>
+                <MetricCard
+                  label="📈 Net Profit"
+                  value={fmt(m.netProfit)}
+                  formula="Opening + Fees − Exp"
+                  color={m.netProfit >= 0 ? '#166534' : '#dc2626'}
+                  bg={m.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'}
+                  border={m.netProfit >= 0 ? '#bbf7d0' : '#fecaca'}/>
+              </div>
+            </Section>
+
+            {/* ══ SECTION 4: CASH FLOW ══ */}
+            <Section title="Cash Flow — from cash log entries">
+              <div className="grid grid-cols-3 gap-2 md:gap-3">
+                <MetricCard label="📥 Received (Cr)" value={fmt(m.cashReceived)} sub="Sum of Cr entries" {...greenSet}/>
+                <MetricCard label="🏦 Banked (Dr)"   value={fmt(m.cashBanked)}  sub="Sum of Dr·Bank"    {...blueSet}/>
+                <MetricCard
+                  label="💰 In Hand"
+                  value={fmt(m.cashInHand)}
+                  sub="Received − All Dr"
+                  color={m.cashInHand >= 0 ? '#92400e' : '#dc2626'}
+                  bg={m.cashInHand >= 0 ? '#fefce8' : '#fef2f2'}
+                  border={m.cashInHand >= 0 ? '#fde68a' : '#fecaca'}/>
+              </div>
+            </Section>
+
+            {/* ══ SECTION 5: BANK RECONCILIATION ══ */}
+            <Section title="Bank Reconciliation">
+              <div className="rounded-2xl p-4 md:p-5"
+                style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 mb-6">
+                  <MetricCard label="Opening Bank"  value={fmt(LAST_BANK_BALANCE)} color={T.textSub} sub="Constant"/>
+                  <MetricCard label="Expected Bank" value={fmt(m.expectedBankBalance)} sub="Opening+Banked+Online−OnlineExp" {...blueSet}/>
+                  <MetricCard
+                    label="Remaining"
+                    value={fmt(m.remainingToCollect)}
+                    sub="Fees−InHand−ExpBank"
+                    color={balanced(m.remainingToCollect) ? '#166534' : '#d97706'}
+                    bg={balanced(m.remainingToCollect) ? '#f0fdf4' : '#fffbeb'}
+                    border={balanced(m.remainingToCollect) ? '#bbf7d0' : '#fde68a'}/>
+                </div>
+
+                <div className="border-t mb-5" style={{ borderColor: T.border }}/>
+
+                <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>
+                  Editable Fields
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls} style={{ color: T.textSub }}>Real Bank Balance (₹)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={realBankBalance}
+                      onChange={(e) => setRealBankBalance(e.target.value)}
+                      placeholder="0"
+                      className={`${inputCls} ${inputHCls}`}
+                      style={cfgInputStyle}/>
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: T.textSub }}>Extra Paid (₹)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={extraPaid}
+                      onChange={(e) => setExtraPaid(e.target.value)}
+                      placeholder="0"
+                      className={`${inputCls} ${inputHCls}`}
+                      style={cfgInputStyle}/>
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Person</label>
+                    <input
+                      type="text"
+                      value={extraPaidPerson}
+                      onChange={(e) => setExtraPaidPerson(e.target.value)}
+                      placeholder="Who paid extra?"
+                      className={`${inputCls} ${inputHCls}`}
+                      style={cfgInputStyle}/>
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Reason</label>
+                    <input
+                      type="text"
+                      value={extraPaidComment}
+                      onChange={(e) => setExtraPaidComment(e.target.value)}
+                      placeholder="Why was it paid?"
+                      className={`${inputCls} ${inputHCls}`}
+                      style={cfgInputStyle}/>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={labelCls} style={{ color: T.textSub }}>Notes</label>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      rows={2}
+                      placeholder="Any observations or notes…"
+                      className={`${inputCls} py-2.5 resize-none`}
+                      style={cfgInputStyle}/>
+                  </div>
+                </div>
+
+                <button
+                  onClick={saveConfig}
+                  disabled={savingConfig}
+                  className="mt-4 px-6 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
+                  style={{
+                    background: configSaved ? '#16a34a' : T.accent,
+                    color: 'white',
+                    minHeight: '44px',
+                    touchAction: 'manipulation',
+                  }}>
+                  {savingConfig ? 'Saving…' : configSaved ? '✓ Saved!' : 'Save Changes'}
+                </button>
+
+                <div className="grid grid-cols-2 gap-2 md:gap-3 mt-6">
+                  <div className="rounded-xl p-4" style={{
+                    background: balanced(m.bankError) ? '#f0fdf4' : '#fef2f2',
+                    border: `1px solid ${balanced(m.bankError) ? '#bbf7d0' : '#fecaca'}`,
+                  }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Bank Error</p>
+                    <p className="text-xl font-bold" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626', fontFamily: "'Georgia', serif" }}>
+                      {fmtSigned(m.bankError)}
+                    </p>
+                    <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted }}>Real − Expected</p>
+                    {balanced(m.bankError) && <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✓ Balanced</p>}
+                  </div>
+                  <div className="rounded-xl p-4" style={{
+                    background: balanced(m.stillToCheck) ? '#f0fdf4' : '#fff7ed',
+                    border: `1px solid ${balanced(m.stillToCheck) ? '#bbf7d0' : '#fed7aa'}`,
+                  }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Still To Check</p>
+                    <p className="text-xl font-bold" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c', fontFamily: "'Georgia', serif" }}>
+                      {fmtSigned(m.stillToCheck)}
+                    </p>
+                    <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted }}>Bank Error − Extra Paid</p>
+                    {balanced(m.stillToCheck) && <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✓ All accounted for</p>}
+                  </div>
+                </div>
+
+                {notes && (
+                  <div className="mt-4 px-4 py-3 rounded-xl"
+                    style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.accent }}>Notes</p>
+                    <p className="text-sm" style={{ color: T.text }}>{notes}</p>
+                  </div>
+                )}
+              </div>
+            </Section>
+
+            {/* ══ SECTION 6: CASH LOG (collapsible) ══ */}
+            <CollapsibleTable
+              open={showCashLog}
+              onToggle={() => setShowCashLog(v => !v)}
+              toggleLabel={
+                <>
+                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Cash Log</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                    {cashLog.length} entries
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
+                  <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>Dr: {fmt(m.cashBanked)}</span>
+                  <span className="text-xs font-semibold" style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>
+                    In Hand: {fmt(m.cashInHand)}
+                  </span>
+                </>
+              }>
+              {cashLog.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-4xl mb-2">📋</p>
+                  <p className="text-sm" style={{ color: T.textMuted }}>No cash log entries yet</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <table className="w-full text-sm" style={{ minWidth: '480px' }}>
+                    <thead>
+                      <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                        {['#', 'Date & Time', 'Type', 'Amount', 'Description', 'By'].map(h => (
+                          <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                            style={{ color: T.textMuted }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cashLog.map((row, i) => (
+                        <tr key={row.id} style={{ borderBottom: `1px solid ${T.border}` }}>
+                          <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
+                          <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
+                          <td className="px-3 py-3">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                              style={{
+                                background: row.type === 'Cr' ? '#f0fdf4' : '#fef2f2',
+                                color:      row.type === 'Cr' ? '#166534' : '#dc2626',
+                                border:     `1px solid ${row.type === 'Cr' ? '#bbf7d0' : '#fecaca'}`,
+                              }}>
+                              {row.type === 'Cr' ? '📥 Cr' : '📤 Dr'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-sm font-semibold" style={{ color: row.type === 'Cr' ? '#166534' : '#dc2626' }}>
+                            {fmt(row.amount)}
+                          </td>
+                          <td className="px-3 py-3 text-xs" style={{ color: T.text }}>
+                            {row.description || <span style={{ color: T.textMuted }}>—</span>}
+                          </td>
+                          <td className="px-3 py-3 text-xs" style={{ color: T.textSub }}>{row.created_by}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background: T.bg, borderTop: `2px solid ${T.border}` }}>
+                        <td colSpan={3} className="px-3 py-3 text-xs font-semibold" style={{ color: T.textMuted }}>Totals</td>
+                        <td colSpan={3} className="px-3 py-3">
+                          <div className="flex gap-3 text-xs font-semibold flex-wrap">
+                            <span style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
+                            <span style={{ color: '#dc2626' }}>Dr: {fmt(cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0))}</span>
+                            <span style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>In Hand: {fmt(m.cashInHand)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </CollapsibleTable>
+
+            {/* ══ SECTION 7: ADMISSIONS TABLE (collapsible) ══ */}
+            <CollapsibleTable
+              open={showAdmTable}
+              onToggle={() => setShowAdmTable(v => !v)}
+              toggleLabel={
+                <>
+                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Admissions</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                    {filteredAdmissions.length} records
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: '#166534' }}>
+                    Collected: {fmt(admSummary.totalCollected)}
+                  </span>
+                  {admSummary.totalDue > 0 && (
+                    <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>
+                      Due: {fmt(admSummary.totalDue)}
+                    </span>
+                  )}
+                </>
+              }>
+              <div className="p-4 border-b" style={{ borderColor: T.border }}>
+                <div className="flex items-center gap-3 flex-wrap mb-4">
+                  <div>
+                    <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
+                    <input
+                      type="date"
+                      value={admStartDate}
+                      onChange={(e) => setAdmStartDate(e.target.value)}
+                      className="px-3 py-2 rounded-xl focus:outline-none"
+                      style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+                  </div>
+                  <div className="self-end pb-1">
+                    <span className="text-xs" style={{ color: T.textMuted }}>{filteredAdmissions.length} records</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="rounded-xl p-3" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Records</p>
+                    <p className="text-lg font-bold" style={{ color: T.accent, fontFamily: "'Georgia', serif" }}>{admSummary.count}</p>
+                  </div>
+                  <div className="rounded-xl p-3" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#166534' }}>Collected</p>
+                    <p className="text-lg font-bold" style={{ color: '#16a34a', fontFamily: "'Georgia', serif" }}>{fmt(admSummary.totalCollected)}</p>
+                    <p className="text-[10px] mt-0.5" style={{ color: '#4ade80' }}>💵 {fmt(admSummary.cashCollected)} · 📱 {fmt(admSummary.onlineCollected)}</p>
+                  </div>
+                  <div className="rounded-xl p-3" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#991b1b' }}>Pending Due</p>
+                    <p className="text-lg font-bold" style={{ color: '#dc2626', fontFamily: "'Georgia', serif" }}>{fmt(admSummary.totalDue)}</p>
+                  </div>
+                  <div className="rounded-xl p-3" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Type</p>
+                    <p className="text-xs font-bold mt-1" style={{ color: '#166534' }}>New: {filteredAdmissions.filter(r => r.admission === 'New').length}</p>
+                    <p className="text-xs font-bold" style={{ color: T.accent }}>Renew: {filteredAdmissions.filter(r => r.admission === 'Renew').length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+                <table className="w-full text-sm" style={{ minWidth: '900px' }}>
+                  <thead>
+                    <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                      {['#', 'Reg ID', 'Name', 'Type', 'Recorded On', 'Shift', 'Fees', 'Paid', 'Mode', 'Due Paid', 'Due Mode', 'Pending', 'Status'].map(h => (
+                        <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                          style={{ color: T.textMuted }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAdmissions.map((row, i) => (
+                      <tr key={row.register_id + i}
+                        className="transition-colors"
+                        style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
+                        <td className="px-3 py-3 text-xs font-mono font-medium" style={{ color: T.accent }}>
+                          <Link href={`/student/${row.mobile_number}`} className="hover:underline">{row.register_id}</Link>
+                        </td>
+                        <td className="px-3 py-3 text-sm font-medium whitespace-nowrap" style={{ color: T.text }}>
+                          <Link href={`/student/${row.mobile_number}`} className="hover:underline">{row.name}</Link>
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                            style={{
+                              background: row.admission === 'New' ? '#f0fdf4' : T.accentLight,
+                              color: row.admission === 'New' ? '#166534' : T.accent,
+                              border: `1px solid ${row.admission === 'New' ? '#bbf7d0' : T.accentBorder}`,
+                            }}>
+                            {row.admission || 'New'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
+                          {row.timestamp ? new Date(row.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                        </td>
+                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.shift}</td>
+                        <td className="px-3 py-3 text-xs font-medium" style={{ color: T.text }}>{fmt(row.final_fees || 0)}</td>
+                        <td className="px-3 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>{fmt(row.fees_submitted || 0)}</td>
+                        <td className="px-3 py-3">
+                          {row.mode
+                            ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                                style={{ background: row.mode === 'Cash' ? '#fefce8' : '#eff6ff', color: row.mode === 'Cash' ? '#854d0e' : '#1d4ed8', border: `1px solid ${row.mode === 'Cash' ? '#fde68a' : '#bfdbfe'}` }}>
+                                {row.mode}
+                              </span>
+                            : <span style={{ color: T.textMuted }}>—</span>}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-medium" style={{ color: (row.due_fees_submitted || 0) > 0 ? '#16a34a' : T.textMuted }}>
+                          {(row.due_fees_submitted || 0) > 0 ? fmt(row.due_fees_submitted) : '—'}
+                        </td>
+                        <td className="px-3 py-3">
+                          {row.due_fees_mode
+                            ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                                style={{ background: row.due_fees_mode === 'Cash' ? '#fefce8' : '#eff6ff', color: row.due_fees_mode === 'Cash' ? '#854d0e' : '#1d4ed8', border: `1px solid ${row.due_fees_mode === 'Cash' ? '#fde68a' : '#bfdbfe'}` }}>
+                                {row.due_fees_mode}
+                              </span>
+                            : <span style={{ color: T.textMuted }}>—</span>}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-medium" style={{ color: (row.due_fees || 0) > 0 ? '#dc2626' : T.textMuted }}>
+                          {(row.due_fees || 0) > 0 ? fmt(row.due_fees) : '—'}
+                        </td>
+                        <td className="px-3 py-3"><StatusBadge status={row.status}/></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CollapsibleTable>
+
+            {/* ══ SECTION 8: EXPENSES TABLE (collapsible) ══ */}
+            <CollapsibleTable
+              open={showExpTable}
+              onToggle={() => setShowExpTable(v => !v)}
+              toggleLabel={
+                <>
+                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Expenses</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                    {filteredExpenses.length} records
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>Total: {fmt(expSummary.total)}</span>
+                  <span className="text-xs font-semibold" style={{ color: '#92400e' }}>💵 {fmt(expSummary.cash)}</span>
+                  <span className="text-xs font-semibold" style={{ color: '#1d4ed8' }}>📱 {fmt(expSummary.online)}</span>
+                </>
+              }>
+              <div className="p-4 border-b" style={{ borderColor: T.border }}>
+                <div className="flex items-center gap-3 flex-wrap mb-4">
+                  <div>
+                    <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
+                    <input
+                      type="date"
+                      value={expStartDate}
+                      onChange={(e) => setExpStartDate(e.target.value)}
+                      className="px-3 py-2 rounded-xl focus:outline-none"
+                      style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+                  </div>
+                  <div className="self-end pb-1">
+                    <span className="text-xs" style={{ color: T.textMuted }}>{filteredExpenses.length} records</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl p-3" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#991b1b' }}>Total Spent</p>
+                    <p className="text-lg font-bold" style={{ color: '#dc2626', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.total)}</p>
+                  </div>
+                  <div className="rounded-xl p-3" style={{ background: '#fefce8', border: '1px solid #fde68a' }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#854d0e' }}>💵 Cash</p>
+                    <p className="text-lg font-bold" style={{ color: '#92400e', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.cash)}</p>
+                  </div>
+                  <div className="rounded-xl p-3" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#1d4ed8' }}>📱 Online</p>
+                    <p className="text-lg font-bold" style={{ color: '#1d4ed8', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.online)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+                <table className="w-full text-sm" style={{ minWidth: '480px' }}>
+                  <thead>
+                    <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                      {['#', 'Date & Time', 'Description', 'Amount', 'Mode', 'By'].map(h => (
+                        <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                          style={{ color: T.textMuted }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredExpenses.map((row, i) => (
+                      <tr key={row.id}
+                        className="transition-colors"
+                        style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
+                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
+                        <td className="px-3 py-3 text-xs" style={{ color: T.text, maxWidth: '200px' }}>{row.Description}</td>
+                        <td className="px-3 py-3 text-sm font-semibold" style={{ color: '#dc2626' }}>{fmt(row.Amount || 0)}</td>
+                        <td className="px-3 py-3">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                            style={{
+                              background: row.Mode === 'Cash' ? '#fefce8' : '#eff6ff',
+                              color: row.Mode === 'Cash' ? '#854d0e' : '#1d4ed8',
+                              border: `1px solid ${row.Mode === 'Cash' ? '#fde68a' : '#bfdbfe'}`,
+                            }}>
+                            {row.Mode}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-xs" style={{ color: T.textSub }}>{row.Created_by}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CollapsibleTable>
+          </>
+        )}
+
       </div>
 
-      {showNewAdmission && (
-        <NewAdmissionPopup
+      {showCashModal && (
+        <AddCashLogModal
           userName={userName}
-          role={role}
-          onClose={() => setShowNewAdmission(false)}
-          onSuccess={() => { cachedStudents = null; fetchStudents(true) }} />
+          onClose={() => setShowCashModal(false)}
+          onSuccess={() => fetchAll()}
+        />
       )}
-
-      {renewStudent && (
-        <RenewPopup
-          student={renewStudent}
-          userName={userName}
-          role={role}
-          onClose={() => setRenewStudent(null)}
-          onSuccess={() => { cachedStudents = null; fetchStudents(true) }} />
-      )}
-
-      {confirmModal && (
-        <ConfirmModal
-          message={confirmModal.message}
-          confirmLabel={confirmModal.confirmLabel}
-          danger={confirmModal.danger}
-          onConfirm={confirmModal.onConfirm}
-          onCancel={() => setConfirmModal(null)} />
-      )}
-    </>
+    </div>
   )
 }
