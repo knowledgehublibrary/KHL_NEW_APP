@@ -75,29 +75,6 @@ async function pingAppsScript() {
   }
 }
 
-// ─── SEAT OCCUPANCY HELPERS ───────────────────────────────────────────────────
-// Looks up everyone currently Active/Expired sitting on a given seat number.
-// Seat 0 is treated as "no seat assigned" so callers should skip the check for it.
-async function fetchSeatOccupants(seat: string) {
-  if (!seat || seat === '0') return []
-  const { data, error } = await supabase
-    .from('v_student_summary')
-    .select('name, mobile_number, status, latest_seat, latest_shift')
-    .eq('latest_seat', seat)
-  if (error || !data) return []
-  return data.filter(
-    (s) => s.status?.includes('Active') || s.status?.includes('Expired')
-  )
-}
-
-/** Formats occupant list as "Naman" or "Naman+1" style, optionally excluding one mobile (used in Renew) */
-function formatOccupants(list: any[], excludeMobile?: string): string | null {
-  const filtered = excludeMobile ? list.filter((s) => s.mobile_number !== excludeMobile) : list
-  if (filtered.length === 0) return null
-  if (filtered.length === 1) return filtered[0].name
-  return `${filtered[0].name}+${filtered.length - 1}`
-}
-
 // ─── CONFIRM MODAL ────────────────────────────────────────────────────────────
 function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onConfirm, onCancel }: {
   message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void; onCancel: () => void
@@ -166,22 +143,6 @@ function NewAdmissionButton({ onClick }: { onClick: () => void }) {
       </svg>
       New Admission
     </button>
-  )
-}
-
-// ─── SEAT STATUS LINE (shared UI for both popups) ─────────────────────────────
-function SeatStatusLine({ seat, checking, occupantLabel }: {
-  seat: string; checking: boolean; occupantLabel: string | null
-}) {
-  if (!seat || seat === '0') return null
-  return (
-    <p className="text-[10px] mt-1.5 font-medium" style={{ color: occupantLabel ? '#b45309' : T.textMuted }}>
-      {checking
-        ? 'Checking seat…'
-        : occupantLabel
-          ? `💺 ${occupantLabel} currently on this seat`
-          : '✓ No one else on this seat'}
-    </p>
   )
 }
 
@@ -349,22 +310,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
 
   const minFees = Math.round(500 * parseFloat(months || '1'))
 
-  // ── Seat occupancy check (excludes the student currently being renewed) ──────
-  const [seatOccupants, setSeatOccupants] = useState<any[]>([])
-  const [seatChecking, setSeatChecking] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    setSeatChecking(true)
-    const t = setTimeout(async () => {
-      const occ = await fetchSeatOccupants(seat)
-      if (active) { setSeatOccupants(occ); setSeatChecking(false) }
-    }, 350)
-    return () => { active = false; clearTimeout(t) }
-  }, [seat])
-
-  const seatOccupantLabel = formatOccupants(seatOccupants, student.mobile_number)
-
   useEffect(() => {
     const fetchRegId = async () => {
       setRegIdLoading(true)
@@ -490,7 +435,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
           <div>
             <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
             <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle} />
-            <SeatStatusLine seat={seat} checking={seatChecking} occupantLabel={seatOccupantLabel} />
           </div>
         </div>
         <div className="mb-4">
@@ -617,7 +561,6 @@ function clearDraft() {
 //   2. Photo upload is locked until mobile is valid & not a duplicate (Step 2)
 //   3. Rest of form still locked until photo is verified (Step 3)
 //   4. Mobile field removed from the Personal Details section (no duplicate field)
-//   5. Seat field now shows who else (if anyone) is occupying that seat
 
 function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   userName: string; role: string; onClose: () => void; onSuccess: () => void
@@ -670,22 +613,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const mobileOk = mobile.length === 10 && !existingStudent
   // Gate 2: photo must be verified (only reachable after mobileOk)
   const fieldsLocked = !photoVerified
-
-  // ── Seat occupancy check (new admission — no student to exclude) ─────────────
-  const [seatOccupants, setSeatOccupants] = useState<any[]>([])
-  const [seatChecking, setSeatChecking] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    setSeatChecking(true)
-    const t = setTimeout(async () => {
-      const occ = await fetchSeatOccupants(seat)
-      if (active) { setSeatOccupants(occ); setSeatChecking(false) }
-    }, 350)
-    return () => { active = false; clearTimeout(t) }
-  }, [seat])
-
-  const seatOccupantLabel = formatOccupants(seatOccupants)
 
   useEffect(() => {
     const fetchRegId = async () => {
@@ -1235,7 +1162,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
               <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
               <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)}
                 min="0" max="92" className={inputCls} style={inputStyle} />
-              <SeatStatusLine seat={seat} checking={seatChecking} occupantLabel={seatOccupantLabel} />
             </div>
           </div>
 
