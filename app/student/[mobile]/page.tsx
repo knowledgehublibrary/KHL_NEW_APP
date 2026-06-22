@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useParams, useRouter } from 'next/navigation'
 
@@ -21,6 +21,241 @@ const T = {
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyxI48i0cFx3c4-MRADfa5nQKQJLIzJR8xAwB0UArEe0_arfxRObvjZA3Tccc6pRE4/exec'
 const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
 
+// ─── FEES CONFIG TYPES (same as main page) ────────────────────────────────────
+interface FeeConfig {
+  seat_type: 'unreserved' | 'reserved'
+  months: number
+  amount: number
+}
+
+function getSeatType(seat: string): 'unreserved' | 'reserved' {
+  const n = parseInt(seat)
+  return isNaN(n) || n === 0 ? 'unreserved' : 'reserved'
+}
+
+function lookupFee(feeConfigs: FeeConfig[], seat: string, months: string): number | null {
+  const seatType = getSeatType(seat)
+  const m = parseInt(months)
+  if (isNaN(m)) return null
+  const entry = feeConfigs.find(f => f.seat_type === seatType && f.months === m)
+  return entry ? entry.amount : null
+}
+
+function getValidMonths(feeConfigs: FeeConfig[], seat: string): number[] {
+  const seatType = getSeatType(seat)
+  return feeConfigs
+    .filter(f => f.seat_type === seatType)
+    .map(f => f.months)
+    .sort((a, b) => a - b)
+}
+
+// ─── SEAT OCCUPANCY HELPERS (same as main page) ───────────────────────────────
+async function fetchSeatOccupants(seat: string) {
+  if (!seat || seat === '0') return []
+  const { data, error } = await supabase
+    .from('v_student_summary')
+    .select('name, mobile_number, status, latest_seat, latest_shift')
+    .eq('latest_seat', seat)
+  if (error || !data) return []
+  return data.filter(
+    (s) => s.status?.includes('Active') || s.status?.includes('Expired')
+  )
+}
+
+function formatOccupants(list: any[], excludeMobile?: string): string | null {
+  const filtered = excludeMobile ? list.filter((s) => s.mobile_number !== excludeMobile) : list
+  if (filtered.length === 0) return null
+  if (filtered.length === 1) return filtered[0].name
+  return `${filtered[0].name}+${filtered.length - 1}`
+}
+
+function SeatStatusLine({ seat, checking, occupantLabel }: {
+  seat: string; checking: boolean; occupantLabel: string | null
+}) {
+  if (!seat || seat === '0') return null
+  return (
+    <p className="text-[10px] mt-1.5 font-medium" style={{ color: occupantLabel ? '#b45309' : T.textMuted }}>
+      {checking
+        ? 'Checking seat…'
+        : occupantLabel
+          ? `💺 ${occupantLabel} currently on this seat`
+          : '✓ No one else on this seat'}
+    </p>
+  )
+}
+
+// ─── MONTHS DROPDOWN (same as main page) ──────────────────────────────────────
+function MonthsPills({
+  feeConfigs, feeConfigsLoading, seat, months, isAdmin,
+  customMonths, showCustom,
+  onSelectMonth, onCustomMonthsChange, onToggleCustom,
+}: {
+  feeConfigs: FeeConfig[]
+  feeConfigsLoading: boolean
+  seat: string
+  months: string
+  isAdmin: boolean
+  customMonths: string
+  showCustom: boolean
+  onSelectMonth: (m: number) => void
+  onCustomMonthsChange: (val: string) => void
+  onToggleCustom: () => void
+}) {
+  const validMonths = getValidMonths(feeConfigs, seat)
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
+
+  if (feeConfigsLoading) {
+    return <div className="h-10 rounded-xl animate-pulse" style={{ background: T.border }} />
+  }
+
+  return (
+    <div>
+      <select
+        value={showCustom ? 'custom' : months}
+        onChange={(e) => {
+          if (e.target.value === 'custom') {
+            onToggleCustom()
+          } else {
+            onSelectMonth(parseInt(e.target.value))
+          }
+        }}
+        className="w-full px-3 py-2.5 rounded-xl focus:outline-none appearance-none"
+        style={inputStyle}
+      >
+        {validMonths.map((m) => (
+          <option key={m} value={m}>{m} Month{m !== 1 ? 's' : ''}</option>
+        ))}
+        {isAdmin && <option value="custom">✏️ Custom</option>}
+      </select>
+
+      {validMonths.length === 0 && (
+        <p className="text-xs mt-1" style={{ color: '#dc2626' }}>
+          No fee plans configured for this seat type.
+          {isAdmin ? ' Use Custom option.' : ' Contact admin.'}
+        </p>
+      )}
+
+      {showCustom && isAdmin && (
+        <div className="mt-2">
+          <input
+            type="number"
+            value={customMonths}
+            onChange={(e) => onCustomMonthsChange(e.target.value)}
+            min="1"
+            placeholder="Enter months"
+            className="w-full px-3 py-2.5 rounded-xl focus:outline-none text-sm"
+            style={{ background: '#fefce8', border: '1px solid #fde047', color: T.text, fontSize: '16px' }}
+          />
+          <p className="text-[10px] mt-1" style={{ color: '#854d0e' }}>
+            ⚠️ Admin override — fees must be entered manually
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── FEES DISPLAY (same as main page) ─────────────────────────────────────────
+function FeesDisplay({
+  feeConfigs, feeConfigsLoading, seat, months, showCustom,
+  finalFees, feesSubmitted, isAdmin,
+  feesOverride, onToggleOverride,
+  onFinalFeesChange, onFeesSubmittedChange,
+  labelCls, inputCls,
+}: {
+  feeConfigs: FeeConfig[]
+  feeConfigsLoading: boolean
+  seat: string
+  months: string
+  showCustom: boolean
+  finalFees: string
+  feesSubmitted: string
+  isAdmin: boolean
+  feesOverride: boolean
+  onToggleOverride: () => void
+  onFinalFeesChange: (val: string) => void
+  onFeesSubmittedChange: (val: string) => void
+  labelCls: string
+  inputCls: string
+}) {
+  const resolvedFee = lookupFee(feeConfigs, seat, months)
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
+  const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
+  const overrideStyle: React.CSSProperties = { background: '#fefce8', border: '1px solid #fde047', color: T.text, fontSize: '16px' }
+
+  const showFeeReadonly = !feesOverride && !showCustom && resolvedFee !== null && !feeConfigsLoading
+
+  return (
+    <div className="grid grid-cols-2 gap-3 mb-4">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className={labelCls} style={{ color: T.textSub, marginBottom: 0 }}>Final Fees *</label>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={onToggleOverride}
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-lg"
+              style={{
+                color: feesOverride ? '#854d0e' : T.textMuted,
+                background: feesOverride ? '#fefce8' : 'transparent',
+                border: `1px solid ${feesOverride ? '#fde047' : T.border}`,
+              }}
+            >
+              {feesOverride ? '🔓 Override on' : '✏️ Override'}
+            </button>
+          )}
+        </div>
+
+        {feeConfigsLoading ? (
+          <div className="h-10 rounded-xl animate-pulse" style={{ background: T.border }} />
+        ) : showFeeReadonly ? (
+          <div>
+            <div className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={readonlyStyle}>
+              ₹{resolvedFee}
+            </div>
+            <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+              {getSeatType(seat) === 'reserved' ? '🪑 Reserved' : '🔓 Unreserved'} · {months} month{parseInt(months) !== 1 ? 's' : ''}
+            </p>
+          </div>
+        ) : showCustom || resolvedFee === null || feesOverride ? (
+          <div>
+            <input
+              type="number"
+              value={finalFees}
+              onChange={(e) => onFinalFeesChange(e.target.value)}
+              className={inputCls}
+              style={feesOverride ? overrideStyle : inputStyle}
+              placeholder="Enter fees"
+            />
+            {feesOverride && (
+              <p className="text-[10px] mt-1" style={{ color: '#854d0e' }}>⚠️ Admin override active</p>
+            )}
+            {showCustom && !feesOverride && (
+              <p className="text-[10px] mt-1" style={{ color: '#854d0e' }}>Enter fees for custom months</p>
+            )}
+            {resolvedFee === null && !showCustom && !feesOverride && (
+              <p className="text-[10px] mt-1" style={{ color: '#dc2626' }}>No fee configured for this combo</p>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      <div>
+        <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+        <input
+          type="number"
+          value={feesSubmitted}
+          onChange={(e) => onFeesSubmittedChange(e.target.value)}
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Amount paid"
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── UTILS ────────────────────────────────────────────────────────────────────
 function getProxyUrl(url: string) {
   if (!url) return ''
   return `/api/image?url=${encodeURIComponent(url)}`
@@ -99,20 +334,15 @@ function ModalSheet({ onClose, children, accentColor = T.accent }: {
       style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div
-        className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        className="relative w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col"
         style={{
           background: T.surface,
           border: `1px solid ${T.border}`,
-          maxHeight: 'calc(100dvh - env(safe-area-inset-top, 44px))',
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch' as any,
-          overscrollBehavior: 'contain',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          maxHeight: 'calc(100dvh - 60px)',
         }}>
-        <div className="h-[3px] rounded-t-2xl"
+        <div className="h-[3px] rounded-t-2xl shrink-0"
           style={{ background: `linear-gradient(90deg, transparent, ${accentColor}, transparent)` }}/>
-        {/* drag handle for mobile */}
-        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+        <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
           <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
         </div>
         {children}
@@ -121,8 +351,7 @@ function ModalSheet({ onClose, children, accentColor = T.accent }: {
   )
 }
 
-// ─── RENEW POPUP ──────────────────────────────────────────────────────────────
-// ── Added role prop + warning state + admin soft bypass ──
+// ─── RENEW POPUP (updated — uses fees_config, same as main page) ──────────────
 function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -133,22 +362,85 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
 
+  // ── Fee config ─────────────────────────────────────────────────────────────
+  const [feeConfigs, setFeeConfigs] = useState<FeeConfig[]>([])
+  const [feeConfigsLoading, setFeeConfigsLoading] = useState(true)
+
   const latestExpiry = toInputDate(student.latest_expiry || student.expiry || '')
   const [startDate, setStartDate] = useState(latestExpiry)
   const [months, setMonths] = useState(student.latest_months?.toString() || student.months?.toString() || '1')
+  const [showCustom, setShowCustom] = useState(false)
+  const [customMonths, setCustomMonths] = useState('')
+  const [feesOverride, setFeesOverride] = useState(false)
   const [seat, setSeat] = useState(student.latest_seat?.toString() || student.seat?.toString() || '')
   const [selectedShifts, setSelectedShifts] = useState<string[]>(() => {
     const raw = student.latest_shift || student.shift || ''
     return raw ? raw.split(', ').map((x: string) => x.trim()) : []
   })
-  const [finalFees, setFinalFees] = useState(student.latest_fees?.toString() || student.final_fees?.toString() || '')
-  const [feesSubmitted, setFeesSubmitted] = useState(student.latest_fees?.toString() || student.fees_submitted?.toString() || '')
+  const [finalFees, setFinalFees] = useState('')
+  const [feesSubmitted, setFeesSubmitted] = useState('')
   const [mode, setMode] = useState('Cash')
   const [comment, setComment] = useState('')
   const now = new Date().toISOString()
 
-  const getMinFees = (m: string) => Math.round(500 * parseFloat(m || '1'))
-  const minFees = getMinFees(months)
+  // ── Seat occupancy check ───────────────────────────────────────────────────
+  const [seatOccupants, setSeatOccupants] = useState<any[]>([])
+  const [seatChecking, setSeatChecking] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setSeatChecking(true)
+    const t = setTimeout(async () => {
+      const occ = await fetchSeatOccupants(seat)
+      if (active) { setSeatOccupants(occ); setSeatChecking(false) }
+    }, 350)
+    return () => { active = false; clearTimeout(t) }
+  }, [seat])
+
+  const seatOccupantLabel = formatOccupants(seatOccupants, student.mobile_number)
+
+  // ── Load fee configs ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      setFeeConfigsLoading(true)
+      const { data } = await supabase
+        .schema('library_management')
+        .from('fees_config')
+        .select('seat_type, months, amount')
+        .eq('is_active', true)
+        .order('seat_type')
+        .order('months')
+      setFeeConfigs((data as FeeConfig[]) || [])
+      setFeeConfigsLoading(false)
+    }
+    load()
+  }, [])
+
+  // ── Auto-resolve fees when seat/months/configs change ─────────────────────
+  useEffect(() => {
+    if (feeConfigsLoading || feesOverride || showCustom) return
+    const fee = lookupFee(feeConfigs, seat, months)
+    if (fee !== null) {
+      setFinalFees(fee.toString())
+      setFeesSubmitted(fee.toString())
+    } else {
+      setFinalFees('')
+      setFeesSubmitted('')
+    }
+  }, [seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom])
+
+  // ── When seat type changes, reset months to first valid option ─────────────
+  const prevSeatTypeRef = useRef<string>('')
+  useEffect(() => {
+    const newType = getSeatType(seat)
+    if (newType !== prevSeatTypeRef.current && !feeConfigsLoading) {
+      prevSeatTypeRef.current = newType
+      const validMs = getValidMonths(feeConfigs, seat)
+      if (validMs.length > 0 && !showCustom) {
+        setMonths(validMs[0].toString())
+      }
+    }
+  }, [seat, feeConfigs, feeConfigsLoading])
 
   useEffect(() => {
     const fetchRegId = async () => {
@@ -164,74 +456,85 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     fetchRegId()
   }, [])
 
-  const toggleShift = (shift: string) => {
+  const toggleShift = (shift: string) =>
     setSelectedShifts(prev => prev.includes(shift) ? prev.filter(x => x !== shift) : [...prev, shift])
-  }
 
-  // Real-time start date validation
   const handleStartDateChange = (val: string) => {
     setStartDate(val)
-    if (val && isDateOlderThan20Days(val)) {
-      setError('Start date cannot be older than 20 days from today')
-    } else if (error.includes('Start date')) {
-      setError('')
+    if (val && isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days from today')
+    else if (error.includes('Start date')) setError('')
+  }
+
+  const handleSelectMonth = (m: number) => {
+    setShowCustom(false)
+    setCustomMonths('')
+    setMonths(m.toString())
+  }
+
+  const handleToggleCustom = () => {
+    const next = !showCustom
+    setShowCustom(next)
+    if (next) {
+      setCustomMonths('')
+      setFinalFees('')
+      setFeesSubmitted('')
+    } else {
+      setCustomMonths('')
+      const validMs = getValidMonths(feeConfigs, seat)
+      if (validMs.length > 0) setMonths(validMs[0].toString())
     }
   }
 
-  // Real-time fees validation
-  const handleFeesChange = (val: string) => {
-    setFinalFees(val)
-    setFeesSubmitted(val)
-    const parsed = parseFloat(val)
-    const currentMin = getMinFees(months)
-    if (val && !isNaN(parsed) && parsed < currentMin) {
-      setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    } else if (error.startsWith('Minimum fees')) {
-      setError('')
-    }
-  }
-
-  // Re-validate fees when months change
-  const handleMonthsChange = (val: string) => {
+  const handleCustomMonthsChange = (val: string) => {
+    setCustomMonths(val)
     setMonths(val)
-    const currentMin = getMinFees(val)
-    const parsed = parseFloat(finalFees)
-    if (finalFees && !isNaN(parsed) && parsed < currentMin) {
-      setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
-    } else if (error.startsWith('Minimum fees')) {
-      setError('')
+  }
+
+  const handleToggleFeesOverride = () => {
+    const next = !feesOverride
+    setFeesOverride(next)
+    if (!next) {
+      const fee = lookupFee(feeConfigs, seat, months)
+      if (fee !== null) { setFinalFees(fee.toString()); setFeesSubmitted(fee.toString()) }
+      else { setFinalFees(''); setFeesSubmitted('') }
     }
   }
 
   const handleSubmit = async () => {
     setWarning('')
+    setError('')
+
     if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
       setError('Please fill all required fields'); return
     }
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
+    if (isNaN(parseFloat(months)) || parseFloat(months) < 1) { setError('Months must be at least 1'); return }
 
-    // Start date check — admin gets warning, others blocked
-    if (isDateOlderThan20Days(startDate)) {
-      if (!isAdmin) { setError('Start date cannot be older than 20 days from today'); return }
-      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    if (!feesOverride && !showCustom) {
+      const expectedFee = lookupFee(feeConfigs, seat, months)
+      if (expectedFee === null) {
+        if (!isAdmin) { setError('No fee plan configured for this seat + month combination. Contact admin.'); return }
+        else setWarning('⚠️ No fee plan found for this combo. Proceeding as admin override.')
+      } else if (parseFloat(finalFees) !== expectedFee) {
+        if (!isAdmin) { setError(`Fees must be ₹${expectedFee} for this plan.`); return }
+        else setWarning(`⚠️ Fees differ from configured ₹${expectedFee}. Proceeding as admin override.`)
+      }
     }
 
-    // Fees check — admin gets warning, others blocked
-    const feesParsed = parseFloat(finalFees)
-    if (feesParsed < minFees) {
-      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
-      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
+    if (isDateOlderThan20Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
+      else setWarning(w => w ? w + ' Start date is older than 20 days.' : '⚠️ Start date is older than 20 days. Proceeding as admin override.')
     }
 
     if (!regId) { setError('Register ID not loaded. Please close and retry.'); return }
-    setSaving(true); setError('')
+    setSaving(true)
 
     const payload = {
       timestamp: now, name: student.name, mobile_number: student.mobile_number,
       admission: 'Renew', address: null, gender: null, date_of_birth: null, aadhar_number: null, photo: null,
       start_date: startDate, months: parseFloat(months), seat, shift: selectedShifts.join(', '),
-      final_fees: feesParsed, fees_submitted: parseFloat(feesSubmitted),
+      final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
       mode, register_id: regId, comment: comment || null, created_by: userName,
     }
 
@@ -239,15 +542,12 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
     try {
-      const res = await fetch(APPS_SCRIPT_URL, { method: 'GET' })
-      const json = await res.json()
-      if (json.status !== 'success') console.warn('Apps Script returned:', json)
+      await fetch(APPS_SCRIPT_URL, { method: 'GET' })
     } catch (e) { console.warn('Apps Script call failed:', e) }
 
     onSuccess(); onClose()
   }
 
-  // font-size: 16px on all inputs prevents iOS auto-zoom
   const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
   const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
@@ -255,7 +555,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
 
   return (
     <ModalSheet onClose={onClose}>
-      <div className="p-5 sm:p-6">
+      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
         <div className="flex items-start justify-between mb-6">
           <div>
             <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>↺ Renew Membership</h2>
@@ -284,23 +584,38 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
 
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => handleStartDateChange(e.target.value)}
-            className={inputCls}
-            style={inputStyle}/>
+          <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+            className={inputCls} style={inputStyle}/>
           <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Default: latest expiry. Cannot be older than 20 days.</p>
         </div>
 
+        {/* Seat + Months */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-            <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)} min="1" className={inputCls} style={inputStyle}/>
+            <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
+            <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)}
+              min="0" max="92" className={inputCls} style={inputStyle}/>
+            <SeatStatusLine seat={seat} checking={seatChecking} occupantLabel={seatOccupantLabel} />
+            {seat !== '' && (
+              <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+                {getSeatType(seat) === 'reserved' ? '🪑 Reserved seat' : '🔓 Unreserved (walk-in)'}
+              </p>
+            )}
           </div>
           <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-            <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle}/>
+            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+            <MonthsPills
+              feeConfigs={feeConfigs}
+              feeConfigsLoading={feeConfigsLoading}
+              seat={seat}
+              months={months}
+              isAdmin={isAdmin}
+              customMonths={customMonths}
+              showCustom={showCustom}
+              onSelectMonth={handleSelectMonth}
+              onCustomMonthsChange={handleCustomMonthsChange}
+              onToggleCustom={handleToggleCustom}
+            />
           </div>
         </div>
 
@@ -324,30 +639,29 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>
-              Final Fees *
-              <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>
-            </label>
-            <input
-              type="number"
-              value={finalFees}
-              onChange={(e) => handleFeesChange(e.target.value)}
-              className={inputCls}
-              style={inputStyle}/>
-          </div>
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-            <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle}/>
-            <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Edit if partial payment</p>
-          </div>
-        </div>
+        {/* Fees */}
+        <FeesDisplay
+          feeConfigs={feeConfigs}
+          feeConfigsLoading={feeConfigsLoading}
+          seat={seat}
+          months={months}
+          showCustom={showCustom}
+          finalFees={finalFees}
+          feesSubmitted={feesSubmitted}
+          isAdmin={isAdmin}
+          feesOverride={feesOverride}
+          onToggleOverride={handleToggleFeesOverride}
+          onFinalFeesChange={(val) => setFinalFees(val)}
+          onFeesSubmittedChange={(val) => setFeesSubmitted(val)}
+          labelCls={labelCls}
+          inputCls={inputCls}
+        />
 
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
-            <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls + ' appearance-none'} style={inputStyle}>
+            <select value={mode} onChange={(e) => setMode(e.target.value)}
+              className={inputCls + ' appearance-none'} style={inputStyle}>
               <option value="Cash">Cash</option><option value="Online">Online</option>
             </select>
           </div>
@@ -363,38 +677,39 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
             placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle}/>
         </div>
 
-        <div className="mb-5">
+        <div className="mb-2">
           <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
           <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
         </div>
 
         {warning && (
-          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
+          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
             <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
           </div>
         )}
         {error && (
-          <div className="mb-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
+          <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fee2e2', border: '1px solid #fca5a5' }}>
             <p className="text-sm" style={{ color: '#991b1b' }}>{error}</p>
           </div>
         )}
+      </div>
 
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
-            style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-          <button onClick={handleSubmit} disabled={saving || regIdLoading}
-            className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-            style={{ background: T.accent, color: 'white' }}>
-            {saving ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>Saving…
-              </span>
-            ) : '✓ Confirm Renewal'}
-          </button>
-        </div>
+      <div className="shrink-0 flex gap-3 p-4 pt-3"
+        style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
+          style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
+        <button onClick={handleSubmit} disabled={saving || regIdLoading || feeConfigsLoading}
+          className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
+          style={{ background: T.accent, color: 'white' }}>
+          {saving ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>Saving…
+            </span>
+          ) : '✓ Confirm Renewal'}
+        </button>
       </div>
     </ModalSheet>
   )
@@ -440,7 +755,7 @@ function ChangeSeatPopup({ latestRecord, userName, onClose, onSuccess }: {
 
   return (
     <ModalSheet onClose={onClose} accentColor="#6366f1">
-      <div className="p-5 sm:p-6">
+      <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
         <div className="flex items-start justify-between mb-6">
           <div>
             <h2 className="font-bold text-xl" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>⇄ Change Seat</h2>
@@ -680,14 +995,6 @@ export default function StudentDetail() {
     )
   }
 
-  // Shared input style with iOS zoom prevention
-  const iosInputStyle: React.CSSProperties = {
-    background: T.bg,
-    border: `1px solid ${T.border}`,
-    color: T.text,
-    fontSize: '16px',
-  }
-
   return (
     <div className="min-h-screen" style={{ background: T.bg }}>
       <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${T.accent}, #e8a87c, ${T.accent})` }}/>
@@ -834,7 +1141,6 @@ export default function StudentDetail() {
         </div>
 
         {/* ── ADMISSION HISTORY TABLE ── */}
-        {/* ── Added columns: Fees Submitted, Mode, Due Paid, Due Paid Date, Due Mode ── */}
         <div className="rounded-2xl overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <div className="px-5 py-4" style={{ borderBottom: `1px solid ${T.border}` }}>
             <p className="text-sm font-semibold" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Admission History</p>
@@ -864,13 +1170,8 @@ export default function StudentDetail() {
                       <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.text }}>{formatDate(row.expiry)}</td>
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: T.text }}>{row.seat}</td>
                       <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.shift}</td>
-                      {/* Fees */}
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: T.text }}>₹{row.final_fees}</td>
-                      {/* Fees Submitted */}
-                      <td className="px-4 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>
-                        ₹{row.fees_submitted || 0}
-                      </td>
-                      {/* Mode */}
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>₹{row.fees_submitted || 0}</td>
                       <td className="px-4 py-3 text-xs">
                         {row.mode ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
@@ -883,19 +1184,11 @@ export default function StudentDetail() {
                           </span>
                         ) : <span style={{ color: T.textMuted }}>—</span>}
                       </td>
-                      {/* Due */}
-                      <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees > 0 ? '#dc2626' : T.textMuted }}>
-                        ₹{row.due_fees || 0}
-                      </td>
-                      {/* Due Paid */}
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees > 0 ? '#dc2626' : T.textMuted }}>₹{row.due_fees || 0}</td>
                       <td className="px-4 py-3 text-xs font-medium" style={{ color: row.due_fees_submitted > 0 ? '#16a34a' : T.textMuted }}>
                         {row.due_fees_submitted > 0 ? `₹${row.due_fees_submitted}` : '—'}
                       </td>
-                      {/* Due Paid Date */}
-                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
-                        {row.due_fees_submitted_date || '—'}
-                      </td>
-                      {/* Due Mode */}
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.due_fees_submitted_date || '—'}</td>
                       <td className="px-4 py-3 text-xs">
                         {row.due_fees_mode ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
@@ -908,7 +1201,6 @@ export default function StudentDetail() {
                           </span>
                         ) : <span style={{ color: T.textMuted }}>—</span>}
                       </td>
-                      {/* Status */}
                       <td className="px-4 py-3"><StatusBadge status={row.status}/></td>
                     </tr>
                   ))}
@@ -921,7 +1213,7 @@ export default function StudentDetail() {
       {/* ── SUBMIT DUE POPUP ── */}
       {showDuePopup && (
         <ModalSheet onClose={() => setShowDuePopup(false)} accentColor="#2563eb">
-          <div className="p-5 sm:p-6">
+          <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="font-bold text-lg" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>💰 Submit Due</h2>
               <button onClick={() => setShowDuePopup(false)} style={{ color: T.textMuted }}>✕</button>
@@ -961,7 +1253,7 @@ export default function StudentDetail() {
       {/* ── FREEZE POPUP ── */}
       {showFreezePopup && (
         <ModalSheet onClose={() => setShowFreezePopup(false)} accentColor={isFrozen ? '#16a34a' : '#f59e0b'}>
-          <div className="p-5 sm:p-6">
+          <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6" style={{ WebkitOverflowScrolling: 'touch' as any }}>
             <div className="flex justify-between items-center mb-5">
               <h2 className="font-bold text-lg" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
                 {isFrozen ? '✓ Unfreeze Student' : '❄ Freeze Student'}
