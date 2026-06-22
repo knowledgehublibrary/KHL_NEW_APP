@@ -23,6 +23,37 @@ const T = {
 
 const SHIFTS = ['6 AM - 12 PM', '12 PM - 6 PM', '6 PM - 11 PM']
 
+// ─── FEES CONFIG TYPES ────────────────────────────────────────────────────────
+interface FeeConfig {
+  seat_type: 'unreserved' | 'reserved'
+  months: number
+  amount: number
+}
+
+/** Derive seat type from seat string */
+function getSeatType(seat: string): 'unreserved' | 'reserved' {
+  const n = parseInt(seat)
+  return isNaN(n) || n === 0 ? 'unreserved' : 'reserved'
+}
+
+/** Look up fee for a given seat + months combo. Returns null if not found in config. */
+function lookupFee(feeConfigs: FeeConfig[], seat: string, months: string): number | null {
+  const seatType = getSeatType(seat)
+  const m = parseInt(months)
+  if (isNaN(m)) return null
+  const entry = feeConfigs.find(f => f.seat_type === seatType && f.months === m)
+  return entry ? entry.amount : null
+}
+
+/** Get valid month options for a given seat type */
+function getValidMonths(feeConfigs: FeeConfig[], seat: string): number[] {
+  const seatType = getSeatType(seat)
+  return feeConfigs
+    .filter(f => f.seat_type === seatType)
+    .map(f => f.months)
+    .sort((a, b) => a - b)
+}
+
 function getProxyUrl(url: string) {
   if (!url) return ''
   return `/api/image?url=${encodeURIComponent(url)}`
@@ -76,8 +107,6 @@ async function pingAppsScript() {
 }
 
 // ─── SEAT OCCUPANCY HELPERS ───────────────────────────────────────────────────
-// Looks up everyone currently Active/Expired sitting on a given seat number.
-// Seat 0 is treated as "no seat assigned" so callers should skip the check for it.
 async function fetchSeatOccupants(seat: string) {
   if (!seat || seat === '0') return []
   const { data, error } = await supabase
@@ -90,7 +119,6 @@ async function fetchSeatOccupants(seat: string) {
   )
 }
 
-/** Formats occupant list as "Naman" or "Naman+1" style, optionally excluding one mobile (used in Renew) */
 function formatOccupants(list: any[], excludeMobile?: string): string | null {
   const filtered = excludeMobile ? list.filter((s) => s.mobile_number !== excludeMobile) : list
   if (filtered.length === 0) return null
@@ -185,6 +213,204 @@ function SeatStatusLine({ seat, checking, occupantLabel }: {
   )
 }
 
+// ─── MONTHS PILLS (shared UI for both popups) ─────────────────────────────────
+function MonthsPills({
+  feeConfigs, feeConfigsLoading, seat, months, isAdmin,
+  customMonths, showCustom,
+  onSelectMonth, onCustomMonthsChange, onToggleCustom,
+}: {
+  feeConfigs: FeeConfig[]
+  feeConfigsLoading: boolean
+  seat: string
+  months: string
+  isAdmin: boolean
+  customMonths: string
+  showCustom: boolean
+  onSelectMonth: (m: number) => void
+  onCustomMonthsChange: (val: string) => void
+  onToggleCustom: () => void
+}) {
+  const validMonths = getValidMonths(feeConfigs, seat)
+  const selectedNum = parseInt(months)
+
+  if (feeConfigsLoading) {
+    return (
+      <div className="flex gap-2 flex-wrap animate-pulse">
+        {[1, 2, 3].map(n => (
+          <div key={n} className="h-9 w-12 rounded-xl" style={{ background: T.border }} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2 flex-wrap">
+        {validMonths.map((m) => {
+          const isSelected = !showCustom && selectedNum === m
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onSelectMonth(m)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+              style={{
+                background: isSelected ? T.accent : T.bg,
+                border: `1px solid ${isSelected ? T.accent : T.border}`,
+                color: isSelected ? 'white' : T.textSub,
+              }}
+            >
+              {m}M
+            </button>
+          )
+        })}
+
+        {/* Admin-only custom override pill */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={onToggleCustom}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+            style={{
+              background: showCustom ? '#fef9c3' : T.bg,
+              border: `1px solid ${showCustom ? '#fde047' : T.border}`,
+              color: showCustom ? '#854d0e' : T.textMuted,
+            }}
+          >
+            ✏️ Custom
+          </button>
+        )}
+      </div>
+
+      {/* Custom months input — admin only */}
+      {showCustom && isAdmin && (
+        <div className="mt-2">
+          <input
+            type="number"
+            value={customMonths}
+            onChange={(e) => onCustomMonthsChange(e.target.value)}
+            min="1"
+            placeholder="Enter months"
+            className="w-full px-3 py-2.5 rounded-xl focus:outline-none text-sm"
+            style={{ background: '#fefce8', border: '1px solid #fde047', color: T.text, fontSize: '16px' }}
+          />
+          <p className="text-[10px] mt-1" style={{ color: '#854d0e' }}>
+            ⚠️ Admin override — fees must be entered manually
+          </p>
+        </div>
+      )}
+
+      {/* No combos available message */}
+      {validMonths.length === 0 && !feeConfigsLoading && (
+        <p className="text-xs mt-1" style={{ color: '#dc2626' }}>
+          No fee plans configured for this seat type.
+          {isAdmin ? ' Use Custom override above.' : ' Contact admin.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── FEES DISPLAY (shared UI for both popups) ─────────────────────────────────
+function FeesDisplay({
+  feeConfigs, feeConfigsLoading, seat, months, showCustom,
+  finalFees, feesSubmitted, isAdmin,
+  feesOverride, onToggleOverride,
+  onFinalFeesChange, onFeesSubmittedChange,
+  labelCls, inputCls,
+}: {
+  feeConfigs: FeeConfig[]
+  feeConfigsLoading: boolean
+  seat: string
+  months: string
+  showCustom: boolean
+  finalFees: string
+  feesSubmitted: string
+  isAdmin: boolean
+  feesOverride: boolean
+  onToggleOverride: () => void
+  onFinalFeesChange: (val: string) => void
+  onFeesSubmittedChange: (val: string) => void
+  labelCls: string
+  inputCls: string
+}) {
+  const resolvedFee = lookupFee(feeConfigs, seat, months)
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
+  const readonlyStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.textMuted }
+  const overrideStyle: React.CSSProperties = { background: '#fefce8', border: '1px solid #fde047', color: T.text, fontSize: '16px' }
+
+  const showFeeReadonly = !feesOverride && !showCustom && resolvedFee !== null && !feeConfigsLoading
+
+  return (
+    <div className="grid grid-cols-2 gap-3 mb-4">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className={labelCls} style={{ color: T.textSub, marginBottom: 0 }}>Final Fees *</label>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={onToggleOverride}
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-lg"
+              style={{
+                color: feesOverride ? '#854d0e' : T.textMuted,
+                background: feesOverride ? '#fefce8' : 'transparent',
+                border: `1px solid ${feesOverride ? '#fde047' : T.border}`,
+              }}
+            >
+              {feesOverride ? '🔓 Override on' : '✏️ Override'}
+            </button>
+          )}
+        </div>
+
+        {feeConfigsLoading ? (
+          <div className="h-10 rounded-xl animate-pulse" style={{ background: T.border }} />
+        ) : showFeeReadonly ? (
+          <div>
+            <div className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={readonlyStyle}>
+              ₹{resolvedFee}
+            </div>
+            <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+              {getSeatType(seat) === 'reserved' ? '🪑 Reserved' : '🔓 Unreserved'} · {months} month{parseInt(months) !== 1 ? 's' : ''}
+            </p>
+          </div>
+        ) : showCustom || resolvedFee === null || feesOverride ? (
+          <div>
+            <input
+              type="number"
+              value={finalFees}
+              onChange={(e) => onFinalFeesChange(e.target.value)}
+              className={inputCls}
+              style={feesOverride ? overrideStyle : inputStyle}
+              placeholder="Enter fees"
+            />
+            {feesOverride && (
+              <p className="text-[10px] mt-1" style={{ color: '#854d0e' }}>⚠️ Admin override active</p>
+            )}
+            {showCustom && !feesOverride && (
+              <p className="text-[10px] mt-1" style={{ color: '#854d0e' }}>Enter fees for custom months</p>
+            )}
+            {resolvedFee === null && !showCustom && !feesOverride && (
+              <p className="text-[10px] mt-1" style={{ color: '#dc2626' }}>No fee configured for this combo</p>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      <div>
+        <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
+        <input
+          type="number"
+          value={feesSubmitted}
+          onChange={(e) => onFeesSubmittedChange(e.target.value)}
+          className={inputCls}
+          style={inputStyle}
+          placeholder="Amount paid"
+        />
+      </div>
+    </div>
+  )
+}
+
 // ─── STUDENT CARD ─────────────────────────────────────────────────────────────
 const StudentCard = memo(({
   s, selectable, selected, onToggle, onRenew, role, highlight,
@@ -218,8 +444,6 @@ const StudentCard = memo(({
         </div>
         <div className="flex-1 min-w-0 pr-6">
           <p className="font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif", fontSize: '15px' }}>{s.name}</p>
-
-          {/* ── FIX: plain text number + proper <a href="tel:"> Call pill — works on iOS & Android ── */}
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs" style={{ color: T.textSub }}>
               {s.mobile_number}
@@ -234,7 +458,6 @@ const StudentCard = memo(({
               📞 Call
             </a>
           </div>
-
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusBadge status={s.status} />
             {s.total_due > 0 && (
@@ -276,7 +499,6 @@ const StudentCard = memo(({
   }
 
   const handleCardClick = (e: React.MouseEvent) => {
-    // Don't navigate if clicking the Call link or Renew button
     const target = e.target as HTMLElement
     if (target.closest('a') || target.closest('button')) return
     router.push(`/student/${s.mobile_number}`)
@@ -334,22 +556,30 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
 
+  // ── Fee config ─────────────────────────────────────────────────────────────
+  const [feeConfigs, setFeeConfigs] = useState<FeeConfig[]>([])
+  const [feeConfigsLoading, setFeeConfigsLoading] = useState(true)
+
   const latestExpiry = toInputDate(student.latest_expiry || '')
   const [startDate, setStartDate] = useState(latestExpiry)
+
+  // Months: derive initial from student's last record, default to '1'
   const [months, setMonths] = useState(student.latest_months?.toString() || '1')
+  const [showCustom, setShowCustom] = useState(false)
+  const [customMonths, setCustomMonths] = useState('')
+  const [feesOverride, setFeesOverride] = useState(false)
+
   const [seat, setSeat] = useState(student.latest_seat?.toString() || '')
   const [selectedShifts, setSelectedShifts] = useState<string[]>(
     student.latest_shift ? student.latest_shift.split(', ').map((x: string) => x.trim()) : []
   )
-  const [finalFees, setFinalFees] = useState(student.latest_fees?.toString() || '')
-  const [feesSubmitted, setFeesSubmitted] = useState(student.latest_fees?.toString() || '')
+  const [finalFees, setFinalFees] = useState('')
+  const [feesSubmitted, setFeesSubmitted] = useState('')
   const [mode, setMode] = useState('Cash')
   const [comment, setComment] = useState('')
   const now = new Date().toISOString()
 
-  const minFees = Math.round(500 * parseFloat(months || '1'))
-
-  // ── Seat occupancy check (excludes the student currently being renewed) ──────
+  // ── Seat occupancy check ───────────────────────────────────────────────────
   const [seatOccupants, setSeatOccupants] = useState<any[]>([])
   const [seatChecking, setSeatChecking] = useState(false)
 
@@ -364,6 +594,49 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   }, [seat])
 
   const seatOccupantLabel = formatOccupants(seatOccupants, student.mobile_number)
+
+  // ── Load fee configs ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      setFeeConfigsLoading(true)
+      const { data } = await supabase
+        .schema('library_management')
+        .from('fees_config')
+        .select('seat_type, months, amount')
+        .eq('is_active', true)
+        .order('seat_type')
+        .order('months')
+      setFeeConfigs((data as FeeConfig[]) || [])
+      setFeeConfigsLoading(false)
+    }
+    load()
+  }, [])
+
+  // ── Auto-resolve fees when seat/months/configs change ─────────────────────
+  useEffect(() => {
+    if (feeConfigsLoading || feesOverride || showCustom) return
+    const fee = lookupFee(feeConfigs, seat, months)
+    if (fee !== null) {
+      setFinalFees(fee.toString())
+      setFeesSubmitted(fee.toString())
+    } else {
+      setFinalFees('')
+      setFeesSubmitted('')
+    }
+  }, [seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom])
+
+  // ── When seat changes, reset months to first valid option for new seat type ─
+  const prevSeatTypeRef = useRef<string>('')
+  useEffect(() => {
+    const newType = getSeatType(seat)
+    if (newType !== prevSeatTypeRef.current && !feeConfigsLoading) {
+      prevSeatTypeRef.current = newType
+      const validMs = getValidMonths(feeConfigs, seat)
+      if (validMs.length > 0 && !showCustom) {
+        setMonths(validMs[0].toString())
+      }
+    }
+  }, [seat, feeConfigs, feeConfigsLoading])
 
   useEffect(() => {
     const fetchRegId = async () => {
@@ -388,42 +661,75 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     else if (error.includes('Start date')) setError('')
   }
 
-  const handleFeesChange = (val: string) => {
-    setFinalFees(val); setFeesSubmitted(val)
-    const parsed = parseFloat(val)
-    const currentMin = Math.round(500 * parseFloat(months || '1'))
-    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    else if (error.startsWith('Minimum fees')) setError('')
+  const handleSelectMonth = (m: number) => {
+    setShowCustom(false)
+    setCustomMonths('')
+    setMonths(m.toString())
+    // fees auto-resolve via useEffect above
   }
 
-  const handleMonthsChange = (val: string) => {
+  const handleToggleCustom = () => {
+    const next = !showCustom
+    setShowCustom(next)
+    if (next) {
+      setCustomMonths('')
+      setFinalFees('')
+      setFeesSubmitted('')
+    } else {
+      setCustomMonths('')
+      // revert to pill selection
+      const validMs = getValidMonths(feeConfigs, seat)
+      if (validMs.length > 0) setMonths(validMs[0].toString())
+    }
+  }
+
+  const handleCustomMonthsChange = (val: string) => {
+    setCustomMonths(val)
     setMonths(val)
-    const currentMin = Math.round(500 * parseFloat(val || '1'))
-    const parsed = parseFloat(finalFees)
-    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${val} month(s) is ₹${currentMin}`)
-    else if (error.startsWith('Minimum fees')) setError('')
+    // fees stay blank — admin fills manually
+  }
+
+  const handleToggleFeesOverride = () => {
+    const next = !feesOverride
+    setFeesOverride(next)
+    if (!next) {
+      // restore resolved fee
+      const fee = lookupFee(feeConfigs, seat, months)
+      if (fee !== null) { setFinalFees(fee.toString()); setFeesSubmitted(fee.toString()) }
+      else { setFinalFees(''); setFeesSubmitted('') }
+    }
   }
 
   const handleSubmit = async () => {
     setWarning('')
+    setError('')
+
     if (!startDate || !months || !seat || selectedShifts.length === 0 || !finalFees || !feesSubmitted) {
       setError('Please fill all required fields'); return
     }
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
+    if (isNaN(parseFloat(months)) || parseFloat(months) < 1) { setError('Months must be at least 1'); return }
+
+    // Validate fees against config (skip if admin override or custom months)
+    if (!feesOverride && !showCustom) {
+      const expectedFee = lookupFee(feeConfigs, seat, months)
+      if (expectedFee === null) {
+        if (!isAdmin) { setError('No fee plan configured for this seat + month combination. Contact admin.'); return }
+        else setWarning('⚠️ No fee plan found for this combo. Proceeding as admin override.')
+      } else if (parseFloat(finalFees) !== expectedFee) {
+        if (!isAdmin) { setError(`Fees must be ₹${expectedFee} for this plan.`); return }
+        else setWarning(`⚠️ Fees differ from configured ₹${expectedFee}. Proceeding as admin override.`)
+      }
+    }
 
     if (isDateOlderThan20Days(startDate)) {
       if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
-      else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
-    }
-
-    if (parseFloat(finalFees) < minFees) {
-      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}`); return }
-      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
+      else setWarning(w => w ? w + ' Start date is older than 20 days.' : '⚠️ Start date is older than 20 days. Proceeding as admin override.')
     }
 
     if (!regId) { setError('Register ID not loaded'); return }
-    setSaving(true); setError('')
+    setSaving(true)
 
     const payload = {
       timestamp: now, name: student.name, mobile_number: student.mobile_number,
@@ -482,17 +788,36 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
           <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
           <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} className={inputCls} style={inputStyle} />
         </div>
+
+        {/* Seat + Months side-by-side */}
         <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-            <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)} min="1" className={inputCls} style={inputStyle} />
-          </div>
           <div>
             <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
             <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} min="0" max="92" className={inputCls} style={inputStyle} />
             <SeatStatusLine seat={seat} checking={seatChecking} occupantLabel={seatOccupantLabel} />
+            {seat !== '' && (
+              <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+                {getSeatType(seat) === 'reserved' ? '🪑 Reserved seat' : '🔓 Unreserved (walk-in)'}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+            <MonthsPills
+              feeConfigs={feeConfigs}
+              feeConfigsLoading={feeConfigsLoading}
+              seat={seat}
+              months={months}
+              isAdmin={isAdmin}
+              customMonths={customMonths}
+              showCustom={showCustom}
+              onSelectMonth={handleSelectMonth}
+              onCustomMonthsChange={handleCustomMonthsChange}
+              onToggleCustom={handleToggleCustom}
+            />
           </div>
         </div>
+
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Shift *</label>
           <div className="space-y-2">
@@ -512,19 +837,25 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
             })}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>
-              Final Fees *
-              {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
-            </label>
-            <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)} className={inputCls} style={inputStyle} />
-          </div>
-          <div>
-            <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-            <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)} className={inputCls} style={inputStyle} />
-          </div>
-        </div>
+
+        {/* Fees */}
+        <FeesDisplay
+          feeConfigs={feeConfigs}
+          feeConfigsLoading={feeConfigsLoading}
+          seat={seat}
+          months={months}
+          showCustom={showCustom}
+          finalFees={finalFees}
+          feesSubmitted={feesSubmitted}
+          isAdmin={isAdmin}
+          feesOverride={feesOverride}
+          onToggleOverride={handleToggleFeesOverride}
+          onFinalFeesChange={(val) => setFinalFees(val)}
+          onFeesSubmittedChange={(val) => setFeesSubmitted(val)}
+          labelCls={labelCls}
+          inputCls={inputCls}
+        />
+
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className={labelCls} style={{ color: T.textSub }}>Payment Mode</label>
@@ -562,7 +893,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
         <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
           style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-        <button onClick={handleSubmit} disabled={saving || regIdLoading}
+        <button onClick={handleSubmit} disabled={saving || regIdLoading || feeConfigsLoading}
           className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
           style={{ background: T.accent, color: 'white' }}>
           {saving
@@ -612,13 +943,6 @@ function clearDraft() {
 
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
-// CHANGES from original:
-//   1. Mobile number field moved ABOVE photo section (Step 1)
-//   2. Photo upload is locked until mobile is valid & not a duplicate (Step 2)
-//   3. Rest of form still locked until photo is verified (Step 3)
-//   4. Mobile field removed from the Personal Details section (no duplicate field)
-//   5. Seat field now shows who else (if anyone) is occupying that seat
-
 function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -627,6 +951,10 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
   const [regId, setRegId] = useState('')
   const [regIdLoading, setRegIdLoading] = useState(true)
+
+  // ── Fee config ─────────────────────────────────────────────────────────────
+  const [feeConfigs, setFeeConfigs] = useState<FeeConfig[]>([])
+  const [feeConfigsLoading, setFeeConfigsLoading] = useState(true)
 
   // ── Photo ──────────────────────────────────────────────────────────────────
   const [photoVerified, setPhotoVerified] = useState(false)
@@ -653,10 +981,13 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const now = new Date().toISOString()
   const [startDate, setStartDate] = useState(draft.startDate || toInputDate(now))
   const [months, setMonths] = useState(draft.months || '1')
+  const [showCustom, setShowCustom] = useState(false)
+  const [customMonths, setCustomMonths] = useState('')
+  const [feesOverride, setFeesOverride] = useState(false)
   const [seat, setSeat] = useState(draft.seat ?? '0')
   const [selectedShifts, setSelectedShifts] = useState<string[]>(draft.selectedShifts || [...SHIFTS])
-  const [finalFees, setFinalFees] = useState(draft.finalFees || '500')
-  const [feesSubmitted, setFeesSubmitted] = useState(draft.feesSubmitted || '500')
+  const [finalFees, setFinalFees] = useState(draft.finalFees || '')
+  const [feesSubmitted, setFeesSubmitted] = useState(draft.feesSubmitted || '')
   const [mode, setMode] = useState(draft.mode || 'Cash')
   const [comment, setComment] = useState(draft.comment || '')
 
@@ -664,14 +995,12 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
 
-  const minFees = Math.round(500 * parseFloat(months || '1'))
-
   // Gate 1: mobile must be 10 digits and not a duplicate
   const mobileOk = mobile.length === 10 && !existingStudent
   // Gate 2: photo must be verified (only reachable after mobileOk)
   const fieldsLocked = !photoVerified
 
-  // ── Seat occupancy check (new admission — no student to exclude) ─────────────
+  // ── Seat occupancy check ───────────────────────────────────────────────────
   const [seatOccupants, setSeatOccupants] = useState<any[]>([])
   const [seatChecking, setSeatChecking] = useState(false)
 
@@ -686,6 +1015,53 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   }, [seat])
 
   const seatOccupantLabel = formatOccupants(seatOccupants)
+
+  // ── Load fee configs once on mount ────────────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      setFeeConfigsLoading(true)
+      const { data } = await supabase
+        .schema('library_management')
+        .from('fees_config')
+        .select('seat_type, months, amount')
+        .eq('is_active', true)
+        .order('seat_type')
+        .order('months')
+      setFeeConfigs((data as FeeConfig[]) || [])
+      setFeeConfigsLoading(false)
+    }
+    load()
+  }, [])
+
+  // ── Auto-resolve fees when seat/months/configs change ─────────────────────
+  useEffect(() => {
+    if (feeConfigsLoading || feesOverride || showCustom) return
+    const fee = lookupFee(feeConfigs, seat, months)
+    if (fee !== null) {
+      setFinalFees(fee.toString())
+      setFeesSubmitted(fee.toString())
+      sd({ finalFees: fee.toString(), feesSubmitted: fee.toString() })
+    } else {
+      setFinalFees('')
+      setFeesSubmitted('')
+      sd({ finalFees: '', feesSubmitted: '' })
+    }
+  }, [seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom])
+
+  // ── When seat type changes, reset months to first valid option ─────────────
+  const prevSeatTypeRef = useRef<string>('')
+  useEffect(() => {
+    const newType = getSeatType(seat)
+    if (newType !== prevSeatTypeRef.current && !feeConfigsLoading) {
+      prevSeatTypeRef.current = newType
+      const validMs = getValidMonths(feeConfigs, seat)
+      if (validMs.length > 0 && !showCustom) {
+        const newM = validMs[0].toString()
+        setMonths(newM)
+        sd({ months: newM })
+      }
+    }
+  }, [seat, feeConfigs, feeConfigsLoading])
 
   useEffect(() => {
     const fetchRegId = async () => {
@@ -768,7 +1144,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
   const openPhotoForm = () => {
     if (!regId) return
-    // Guard: don't allow photo upload until mobile is valid & unique
     if (!mobileOk) return
     window.open(`${PHOTO_FORM_BASE}?usp=pp_url&entry.754882253=${encodeURIComponent(regId)}`, '_blank')
     startAutoFlow()
@@ -785,8 +1160,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     const digits = val.replace(/\D/g, '').slice(0, 10)
     setMobile(digits); sd({ mobile: digits }); setMobileError(''); setExistingStudent(null)
 
-    // Reset photo state whenever mobile changes — prevents stale photo being
-    // linked to a newly entered number
     if (photoVerified || photoPhase !== 'idle') {
       pollingRef.current?.stop()
       setPhotoVerified(false); setPhotoUrl(''); setPhotoPreviewUrl('')
@@ -809,26 +1182,55 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     else if (error.includes('Start date')) setError('')
   }
 
-  const handleMonthsChange = (val: string) => {
-    const prevMin = Math.round(500 * parseFloat(months || '1'))
-    const newMin = Math.round(500 * parseFloat(val || '1'))
-    setMonths(val); sd({ months: val })
-    const currentFees = parseFloat(finalFees)
-    if (isNaN(currentFees) || currentFees === prevMin) {
-      setFinalFees(newMin.toString()); setFeesSubmitted(newMin.toString())
-      sd({ finalFees: newMin.toString(), feesSubmitted: newMin.toString() })
-      if (error.startsWith('Minimum fees')) setError('')
-    } else if (currentFees < newMin) {
-      setError(`Minimum fees for ${val} month(s) is ₹${newMin}`)
-    } else if (error.startsWith('Minimum fees')) { setError('') }
+  const handleSelectMonth = (m: number) => {
+    setShowCustom(false)
+    setCustomMonths('')
+    const val = m.toString()
+    setMonths(val)
+    sd({ months: val })
+    // fees auto-resolve via useEffect
   }
 
-  const handleFeesChange = (val: string) => {
-    setFinalFees(val); setFeesSubmitted(val); sd({ finalFees: val, feesSubmitted: val })
-    const parsed = parseFloat(val)
-    const currentMin = Math.round(500 * parseFloat(months || '1'))
-    if (!isNaN(parsed) && parsed < currentMin) setError(`Minimum fees for ${months} month(s) is ₹${currentMin}`)
-    else if (error.startsWith('Minimum fees')) setError('')
+  const handleToggleCustom = () => {
+    const next = !showCustom
+    setShowCustom(next)
+    if (next) {
+      setCustomMonths('')
+      setFinalFees('')
+      setFeesSubmitted('')
+      sd({ finalFees: '', feesSubmitted: '' })
+    } else {
+      setCustomMonths('')
+      const validMs = getValidMonths(feeConfigs, seat)
+      if (validMs.length > 0) {
+        const newM = validMs[0].toString()
+        setMonths(newM)
+        sd({ months: newM })
+      }
+    }
+  }
+
+  const handleCustomMonthsChange = (val: string) => {
+    setCustomMonths(val)
+    setMonths(val)
+    sd({ months: val })
+  }
+
+  const handleToggleFeesOverride = () => {
+    const next = !feesOverride
+    setFeesOverride(next)
+    if (!next) {
+      const fee = lookupFee(feeConfigs, seat, months)
+      if (fee !== null) {
+        setFinalFees(fee.toString())
+        setFeesSubmitted(fee.toString())
+        sd({ finalFees: fee.toString(), feesSubmitted: fee.toString() })
+      } else {
+        setFinalFees('')
+        setFeesSubmitted('')
+        sd({ finalFees: '', feesSubmitted: '' })
+      }
+    }
   }
 
   const toggleShift = (shift: string) => {
@@ -857,10 +1259,20 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     const seatNum = parseInt(seat)
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92.'); return }
     if (selectedShifts.length === 0) { setError('Please select at least one shift.'); return }
-    if (!finalFees || parseFloat(finalFees) < minFees) {
-      if (!isAdmin) { setError(`Minimum fees for ${months} month(s) is ₹${minFees}.`); return }
-      else setWarning(`⚠️ Fees below minimum (₹${minFees}) for ${months} month(s). Proceeding as admin override.`)
+
+    // Fee validation
+    if (!finalFees) { setError('Fees are required.'); return }
+    if (!feesOverride && !showCustom) {
+      const expectedFee = lookupFee(feeConfigs, seat, months)
+      if (expectedFee === null) {
+        if (!isAdmin) { setError('No fee plan configured for this seat + month combination. Contact admin.'); return }
+        else setWarning(w => w ? w : '⚠️ No fee plan found for this combo. Proceeding as admin override.')
+      } else if (parseFloat(finalFees) !== expectedFee) {
+        if (!isAdmin) { setError(`Fees must be ₹${expectedFee} for this plan.`); return }
+        else setWarning(`⚠️ Fees differ from configured ₹${expectedFee}. Proceeding as admin override.`)
+      }
     }
+
     if (!feesSubmitted) { setError('Fees Submitted is required.'); return }
     if (!regId) { setError('Register ID not loaded yet. Please wait.'); return }
     if (!photoVerified || !photoUrl) { setError('Please verify the student photo before submitting.'); return }
@@ -894,7 +1306,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const labelCls = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
   const inputCls = "w-full px-3 py-2.5 rounded-xl focus:outline-none"
 
-  // ── Photo section (unchanged internals, same as original) ──────────────────
+  // ── Photo section ──────────────────────────────────────────────────────────
   const PhotoSection = () => {
     if (photoVerified) {
       return (
@@ -1056,9 +1468,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           </div>
         </div>
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 1 — Mobile Number (always visible, always editable)
-        ═══════════════════════════════════════════════════ */}
+        {/* STEP 1 — Mobile */}
         <SectionLabel>📱 Step 1 — Verify Mobile Number</SectionLabel>
 
         <div className="mb-4">
@@ -1072,15 +1482,11 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             className={inputCls}
             style={existingStudent ? errorInputStyle : inputStyle}
           />
-
-          {/* ✅ Available */}
           {mobile.length === 10 && !existingStudent && (
             <p className="text-[10px] mt-1.5 font-semibold" style={{ color: '#166534' }}>
               ✅ Mobile number is available — proceed to upload photo
             </p>
           )}
-
-          {/* ❌ Duplicate — show existing student card */}
           {existingStudent && (
             <div className="mt-2">
               <p className="text-[10px] uppercase tracking-widest font-semibold mb-1.5" style={{ color: T.textMuted }}>
@@ -1125,9 +1531,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           )}
         </div>
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 2 — Photo Upload (locked until mobile is valid & unique)
-        ═══════════════════════════════════════════════════ */}
+        {/* STEP 2 — Photo */}
         <SectionLabel>📸 Step 2 — Upload Photo</SectionLabel>
 
         {!mobileOk ? (
@@ -1141,9 +1545,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           <PhotoSection />
         )}
 
-        {/* ═══════════════════════════════════════════════════
-            STEP 3 — Rest of form (locked until photo verified)
-        ═══════════════════════════════════════════════════ */}
+        {/* STEP 3 — Rest of form lock hint */}
         {mobileOk && fieldsLocked && (
           <div className="mt-3 mb-1 px-4 py-3 rounded-xl text-center text-xs font-medium"
             style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
@@ -1158,7 +1560,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
         }}>
           <SectionLabel>👤 Personal Details</SectionLabel>
 
-          {/* Full Name */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Full Name *</label>
             <input
@@ -1177,9 +1578,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             )}
           </div>
 
-          {/* NOTE: Mobile number field intentionally removed here — it lives in Step 1 above */}
-
-          {/* Address */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Address</label>
             <input type="text" value={address}
@@ -1187,7 +1585,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
               placeholder="Optional" className={inputCls} style={inputStyle} />
           </div>
 
-          {/* Gender + DOB */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
               <label className={labelCls} style={{ color: T.textSub }}>Gender *</label>
@@ -1207,7 +1604,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             </div>
           </div>
 
-          {/* Aadhar */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Aadhar Number (optional)</label>
             <input type="text" value={aadhar} maxLength={14}
@@ -1217,25 +1613,39 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
 
           <SectionLabel>📋 Admission Details</SectionLabel>
 
-          {/* Start Date */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
             <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
               className={inputCls} style={inputStyle} />
           </div>
 
-          {/* Months + Seat */}
+          {/* Seat + Months */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
-              <input type="number" value={months} onChange={(e) => handleMonthsChange(e.target.value)}
-                min="1" className={inputCls} style={inputStyle} />
-            </div>
-            <div>
               <label className={labelCls} style={{ color: T.textSub }}>Seat (0–92) *</label>
-              <input type="number" value={seat} onChange={(e) => setSeat(e.target.value)}
+              <input type="number" value={seat} onChange={(e) => { setSeat(e.target.value); sd({ seat: e.target.value }) }}
                 min="0" max="92" className={inputCls} style={inputStyle} />
               <SeatStatusLine seat={seat} checking={seatChecking} occupantLabel={seatOccupantLabel} />
+              {seat !== '' && (
+                <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+                  {getSeatType(seat) === 'reserved' ? '🪑 Reserved seat' : '🔓 Unreserved (walk-in)'}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: T.textSub }}>Months *</label>
+              <MonthsPills
+                feeConfigs={feeConfigs}
+                feeConfigsLoading={feeConfigsLoading}
+                seat={seat}
+                months={months}
+                isAdmin={isAdmin}
+                customMonths={customMonths}
+                showCustom={showCustom}
+                onSelectMonth={handleSelectMonth}
+                onCustomMonthsChange={handleCustomMonthsChange}
+                onToggleCustom={handleToggleCustom}
+              />
             </div>
           </div>
 
@@ -1261,21 +1671,22 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           </div>
 
           {/* Fees */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>
-                Final Fees *
-                {finalFees && <span className="ml-1 text-[9px]" style={{ color: T.textMuted }}>min ₹{minFees}</span>}
-              </label>
-              <input type="number" value={finalFees} onChange={(e) => handleFeesChange(e.target.value)}
-                className={inputCls} style={inputStyle} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: T.textSub }}>Fees Submitted *</label>
-              <input type="number" value={feesSubmitted} onChange={(e) => setFeesSubmitted(e.target.value)}
-                className={inputCls} style={inputStyle} />
-            </div>
-          </div>
+          <FeesDisplay
+            feeConfigs={feeConfigs}
+            feeConfigsLoading={feeConfigsLoading}
+            seat={seat}
+            months={months}
+            showCustom={showCustom}
+            finalFees={finalFees}
+            feesSubmitted={feesSubmitted}
+            isAdmin={isAdmin}
+            feesOverride={feesOverride}
+            onToggleOverride={handleToggleFeesOverride}
+            onFinalFeesChange={(val) => { setFinalFees(val); sd({ finalFees: val }) }}
+            onFeesSubmittedChange={(val) => { setFeesSubmitted(val); sd({ feesSubmitted: val }) }}
+            labelCls={labelCls}
+            inputCls={inputCls}
+          />
 
           {/* Payment Mode + Admission type */}
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1293,21 +1704,18 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
             </div>
           </div>
 
-          {/* Comment */}
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Comment (optional)</label>
             <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
               placeholder="Any notes…" className={inputCls + ' resize-none'} style={inputStyle} />
           </div>
 
-          {/* Created By */}
           <div className="mb-2">
             <label className={labelCls} style={{ color: T.textSub }}>Created By</label>
             <div className="px-3 py-2.5 rounded-xl text-sm" style={readonlyStyle}>{userName}</div>
           </div>
         </div>
 
-        {/* Warnings & Errors */}
         {warning && (
           <div className="mt-4 px-4 py-2.5 rounded-xl" style={{ background: '#fefce8', border: '1px solid #fde047' }}>
             <p className="text-sm" style={{ color: '#854d0e' }}>{warning}</p>
@@ -1320,12 +1728,11 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
         )}
       </div>
 
-      {/* Footer buttons */}
       <div className="shrink-0 flex gap-3 p-4 pt-3"
         style={{ borderTop: `1px solid ${T.border}`, background: T.surface, paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
         <button onClick={onClose} className="flex-1 py-3 rounded-xl text-sm"
           style={{ border: `1px solid ${T.border}`, color: T.textSub }}>Cancel</button>
-        <button onClick={handleSubmit} disabled={saving || regIdLoading}
+        <button onClick={handleSubmit} disabled={saving || regIdLoading || feeConfigsLoading}
           className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
           style={{ background: T.accent, color: 'white' }}>
           {saving
@@ -1353,7 +1760,6 @@ export default function Home() {
 
   const [students, setStudents] = useState<any[]>([])
 
-  // ── FIX: Start with safe defaults — sessionStorage restored in useEffect after mount ──
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [filter, setFilter] = useState('active')
@@ -1372,7 +1778,6 @@ export default function Home() {
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
   } | null>(null)
 
-  // ── FIX: Restore sessionStorage values safely after mount (avoids hydration mismatch) ──
   useEffect(() => {
     try {
       const savedFilter = sessionStorage.getItem('dashboard_filter') || 'active'
@@ -1474,18 +1879,18 @@ export default function Home() {
       result.sort((a, b) => {
         const da = a.latest_expiry ? new Date(a.latest_expiry).getTime() : 0
         const db = b.latest_expiry ? new Date(b.latest_expiry).getTime() : 0
-        return db - da // most recently expired (e.g. expired today) comes first
+        return db - da
       })
     } else if (filter === 'active') {
       result.sort((a, b) => {
         const diffA = getExpiryDiffDays(a.latest_expiry)
         const diffB = getExpiryDiffDays(b.latest_expiry)
-        const groupA = diffA !== null && diffA <= 7 ? 0 : 1 // 0 = yellow group, 1 = normal group
+        const groupA = diffA !== null && diffA <= 7 ? 0 : 1
         const groupB = diffB !== null && diffB <= 7 ? 0 : 1
         if (groupA !== groupB) return groupA - groupB
         const da = a.latest_expiry ? new Date(a.latest_expiry).getTime() : Infinity
         const db = b.latest_expiry ? new Date(b.latest_expiry).getTime() : Infinity
-        return da - db // within each group, soonest-to-expire first
+        return da - db
       })
     }
     return result
