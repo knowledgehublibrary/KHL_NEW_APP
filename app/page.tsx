@@ -230,56 +230,38 @@ function MonthsPills({
   onToggleCustom: () => void
 }) {
   const validMonths = getValidMonths(feeConfigs, seat)
-  const selectedNum = parseInt(months)
+  const inputStyle: React.CSSProperties = { background: T.bg, border: `1px solid ${T.border}`, color: T.text, fontSize: '16px' }
 
   if (feeConfigsLoading) {
-    return (
-      <div className="flex gap-2 flex-wrap animate-pulse">
-        {[1, 2, 3].map(n => (
-          <div key={n} className="h-9 w-12 rounded-xl" style={{ background: T.border }} />
-        ))}
-      </div>
-    )
+    return <div className="h-10 rounded-xl animate-pulse" style={{ background: T.border }} />
   }
 
   return (
     <div>
-      <div className="flex gap-2 flex-wrap">
-        {validMonths.map((m) => {
-          const isSelected = !showCustom && selectedNum === m
-          return (
-            <button
-              key={m}
-              type="button"
-              onClick={() => onSelectMonth(m)}
-              className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-              style={{
-                background: isSelected ? T.accent : T.bg,
-                border: `1px solid ${isSelected ? T.accent : T.border}`,
-                color: isSelected ? 'white' : T.textSub,
-              }}
-            >
-              {m}M
-            </button>
-          )
-        })}
+      <select
+        value={showCustom ? 'custom' : months}
+        onChange={(e) => {
+          if (e.target.value === 'custom') {
+            onToggleCustom()
+          } else {
+            onSelectMonth(parseInt(e.target.value))
+          }
+        }}
+        className="w-full px-3 py-2.5 rounded-xl focus:outline-none appearance-none"
+        style={inputStyle}
+      >
+        {validMonths.map((m) => (
+          <option key={m} value={m}>{m} Month{m !== 1 ? 's' : ''}</option>
+        ))}
+        {isAdmin && <option value="custom">✏️ Custom</option>}
+      </select>
 
-        {/* Admin-only custom override pill */}
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={onToggleCustom}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={{
-              background: showCustom ? '#fef9c3' : T.bg,
-              border: `1px solid ${showCustom ? '#fde047' : T.border}`,
-              color: showCustom ? '#854d0e' : T.textMuted,
-            }}
-          >
-            ✏️ Custom
-          </button>
-        )}
-      </div>
+      {validMonths.length === 0 && (
+        <p className="text-xs mt-1" style={{ color: '#dc2626' }}>
+          No fee plans configured for this seat type.
+          {isAdmin ? ' Use Custom option.' : ' Contact admin.'}
+        </p>
+      )}
 
       {/* Custom months input — admin only */}
       {showCustom && isAdmin && (
@@ -297,14 +279,6 @@ function MonthsPills({
             ⚠️ Admin override — fees must be entered manually
           </p>
         </div>
-      )}
-
-      {/* No combos available message */}
-      {validMonths.length === 0 && !feeConfigsLoading && (
-        <p className="text-xs mt-1" style={{ color: '#dc2626' }}>
-          No fee plans configured for this seat type.
-          {isAdmin ? ' Use Custom override above.' : ' Contact admin.'}
-        </p>
       )}
     </div>
   )
