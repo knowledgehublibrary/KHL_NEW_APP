@@ -27,6 +27,7 @@ interface FeeConfig {
   seat_type: 'unreserved' | 'reserved'
   months: number
   amount: number
+  referral_amount: number  // ← NEW
 }
 
 /** Derive seat type from seat string */
@@ -42,6 +43,17 @@ function lookupFee(feeConfigs: FeeConfig[], seat: string, months: string): numbe
   if (isNaN(m)) return null
   const entry = feeConfigs.find(f => f.seat_type === seatType && f.months === m)
   return entry ? entry.amount : null
+}
+
+// ─── NEW: Look up referral_amount for a seat + months combo ──────────────────
+/** Returns 0 for unreserved or if not found */
+function lookupReferralAmount(feeConfigs: FeeConfig[], seat: string, months: string): number {
+  const seatType = getSeatType(seat)
+  if (seatType === 'unreserved') return 0
+  const m = parseInt(months)
+  if (isNaN(m)) return 0
+  const entry = feeConfigs.find(f => f.seat_type === seatType && f.months === m)
+  return entry ? (entry.referral_amount ?? 0) : 0
 }
 
 /** Get valid month options for a given seat type */
@@ -518,6 +530,71 @@ function ModalShell({ onBackdropClick, children }: {
   )
 }
 
+// ─── REFERRER CARD (non-clickable, shown in New Admission) ───────────────────
+function ReferrerCard({ student }: { student: any }) {
+  const isActive = student.status?.toLowerCase().includes('active')
+  const hasReservedSeat = parseInt(student.latest_seat) > 0
+
+  const statusDot = isActive ? '#16a34a'
+    : student.status?.toLowerCase().includes('blocked') ? '#9ca3af'
+      : student.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
+        : '#dc2626'
+
+  const cardBg = isActive && hasReservedSeat ? '#f0fdf4' : '#fef2f2'
+  const cardBorder = isActive && hasReservedSeat ? '#86efac' : '#fca5a5'
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+      <div className="flex items-center gap-4 p-4">
+        <div className="relative shrink-0">
+          <img loading="lazy" src={getProxyUrl(student.image_url) || '/default-avatar.png'}
+            onError={(e) => { e.currentTarget.src = '/default-avatar.png' }}
+            className="w-14 h-14 rounded-xl object-cover" style={{ border: `1px solid ${T.border}` }} />
+          <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2"
+            style={{ borderColor: T.surface, background: statusDot }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold truncate" style={{ color: T.text, fontFamily: "'Georgia', serif", fontSize: '15px' }}>
+            {student.name}
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: T.textSub }}>{student.mobile_number}</p>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <StatusBadge status={student.status} />
+            {student.latest_seat && parseInt(student.latest_seat) > 0 && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: '#e0f2fe', color: '#075985', border: '1px solid #7dd3fc' }}>
+                🪑 Seat {student.latest_seat}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      {/* Status message */}
+      {!isActive && (
+        <div className="px-4 pb-3 -mt-1">
+          <p className="text-xs font-semibold" style={{ color: '#991b1b' }}>
+            ❌ Referrer is {student.status?.toLowerCase()} — referral will not be counted
+          </p>
+        </div>
+      )}
+      {isActive && !hasReservedSeat && (
+        <div className="px-4 pb-3 -mt-1">
+          <p className="text-xs font-semibold" style={{ color: '#991b1b' }}>
+            ❌ Referrer has no reserved seat — referral will not be counted
+          </p>
+        </div>
+      )}
+      {isActive && hasReservedSeat && (
+        <div className="px-4 pb-3 -mt-1">
+          <p className="text-xs font-semibold" style={{ color: '#166534' }}>
+            ✅ Referrer is active with a reserved seat — referral is valid
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── RENEW POPUP ──────────────────────────────────────────────────────────────
 function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
@@ -536,7 +613,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const latestExpiry = toInputDate(student.latest_expiry || '')
   const [startDate, setStartDate] = useState(latestExpiry)
 
-  // Months: derive initial from student's last record, default to '1'
   const [months, setMonths] = useState(student.latest_months?.toString() || '1')
   const [showCustom, setShowCustom] = useState(false)
   const [customMonths, setCustomMonths] = useState('')
@@ -551,6 +627,11 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const [mode, setMode] = useState('Cash')
   const [comment, setComment] = useState('')
   const now = new Date().toISOString()
+
+  // ── REFERRAL: pending discount for this student (as referrer) ─────────────
+  const [pendingReferralAmount, setPendingReferralAmount] = useState(0)
+  const [referralLoaded, setReferralLoaded] = useState(false)
+  const isReservedSeatRenew = parseInt(seat) > 0
 
   // ── Seat occupancy check ───────────────────────────────────────────────────
   const [seatOccupants, setSeatOccupants] = useState<any[]>([])
@@ -575,7 +656,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
       const { data } = await supabase
         .schema('library_management')
         .from('fees_config')
-        .select('seat_type, months, amount')
+        .select('seat_type, months, amount, referral_amount')  // ← updated
         .eq('is_active', true)
         .order('seat_type')
         .order('months')
@@ -584,6 +665,22 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     }
     load()
   }, [])
+
+  // ── Load pending referral discounts for this student ──────────────────────
+  useEffect(() => {
+    const loadReferral = async () => {
+      const { data } = await supabase
+        .schema('library_management')
+        .from('referral_discounts')
+        .select('amount')
+        .eq('referrer_mobile', student.mobile_number)
+        .eq('status', 'pending')
+      const total = (data || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0)
+      setPendingReferralAmount(total)
+      setReferralLoaded(true)
+    }
+    loadReferral()
+  }, [student.mobile_number])
 
   // ── Auto-resolve fees when seat/months/configs change ─────────────────────
   useEffect(() => {
@@ -598,7 +695,20 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     }
   }, [seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom])
 
-  // ── When seat changes, reset months to first valid option for new seat type ─
+  // ── Auto-apply referral discount to fees_submitted (reserved seat only) ───
+  useEffect(() => {
+    if (!referralLoaded || pendingReferralAmount === 0) return
+    if (feesOverride || showCustom || feeConfigsLoading) return
+    if (!isReservedSeatRenew) return
+    const fee = lookupFee(feeConfigs, seat, months)
+    if (fee !== null) {
+      const discounted = Math.max(0, fee - pendingReferralAmount)
+      setFinalFees(discounted.toString())
+      setFeesSubmitted(discounted.toString())
+    }
+  }, [referralLoaded, pendingReferralAmount, seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom, isReservedSeatRenew])
+
+  // ── When seat type changes, reset months to first valid option ─────────────
   const prevSeatTypeRef = useRef<string>('')
   useEffect(() => {
     const newType = getSeatType(seat)
@@ -638,7 +748,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     setShowCustom(false)
     setCustomMonths('')
     setMonths(m.toString())
-    // fees auto-resolve via useEffect above
   }
 
   const handleToggleCustom = () => {
@@ -650,7 +759,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
       setFeesSubmitted('')
     } else {
       setCustomMonths('')
-      // revert to pill selection
       const validMs = getValidMonths(feeConfigs, seat)
       if (validMs.length > 0) setMonths(validMs[0].toString())
     }
@@ -659,14 +767,12 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const handleCustomMonthsChange = (val: string) => {
     setCustomMonths(val)
     setMonths(val)
-    // fees stay blank — admin fills manually
   }
 
   const handleToggleFeesOverride = () => {
     const next = !feesOverride
     setFeesOverride(next)
     if (!next) {
-      // restore resolved fee
       const fee = lookupFee(feeConfigs, seat, months)
       if (fee !== null) { setFinalFees(fee.toString()); setFeesSubmitted(fee.toString()) }
       else { setFinalFees(''); setFeesSubmitted('') }
@@ -684,7 +790,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92'); return }
     if (isNaN(parseFloat(months)) || parseFloat(months) < 1) { setError('Months must be at least 1'); return }
 
-    // Validate fees against config (skip if admin override or custom months)
     if (!feesOverride && !showCustom) {
       const expectedFee = lookupFee(feeConfigs, seat, months)
       if (expectedFee === null) {
@@ -714,6 +819,94 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
 
     const { error: insertError } = await supabase.schema('library_management').from('admission_responses').insert([payload])
     if (insertError) { setError(insertError.message); setSaving(false); return }
+
+    // ── REFERRAL STEP 1: Apply pending discounts if reserved seat ─────────────
+    if (isReservedSeatRenew && pendingReferralAmount > 0) {
+      await supabase
+        .schema('library_management')
+        .from('referral_discounts')
+        .update({
+          status: 'applied',
+          applied_at: new Date().toISOString(),
+          referrer_reg_id: regId,  // ← Naman's renewal register_id
+        })
+        .eq('referrer_mobile', student.mobile_number)
+        .eq('status', 'pending')
+    }
+    
+    // ── REFERRAL STEP 2: Credit referrer if this student was referred ─────────
+    if (isReservedSeatRenew) {
+      const { data: originalAdmission } = await supabase
+        .schema('library_management')
+        .from('admission_responses')
+        .select('referred_by_mobile, register_id')
+        .eq('mobile_number', student.mobile_number)
+        .eq('admission', 'New')
+        .not('referred_by_mobile', 'is', null)
+        .order('id', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+    
+      if (originalAdmission?.referred_by_mobile) {
+        const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
+        if (referralAmt > 0) {
+          await supabase.schema('library_management').from('referral_discounts').insert([{
+            referrer_mobile: originalAdmission.referred_by_mobile,
+            referred_mobile: student.mobile_number,
+            referred_reg_id: regId,  // ← this renewal's register_id
+            amount: referralAmt,
+            status: 'pending',
+          }])
+        }
+      }
+    }
+    // // ── REFERRAL STEP 1: Apply pending discounts if reserved seat ─────────────
+    // if (isReservedSeatRenew && pendingReferralAmount > 0) {
+    //   await supabase
+    //     .schema('library_management')
+    //     .from('referral_discounts')
+    //     .update({ status: 'applied', applied_at: new Date().toISOString() })
+    //     .eq('referrer_mobile', student.mobile_number)
+    //     .eq('status', 'pending')
+    // }
+
+    // // ── REFERRAL STEP 2: Credit referrer if this student was referred ─────────
+    // // Look up the original admission row to find referred_by_mobile
+    // if (isReservedSeatRenew) {
+    //   const { data: originalAdmission } = await supabase
+    //     .schema('library_management')
+    //     .from('admission_responses')
+    //     .select('referred_by_mobile')
+    //     .eq('mobile_number', student.mobile_number)
+    //     .eq('admission', 'New')
+    //     .not('referred_by_mobile', 'is', null)
+    //     .order('id', { ascending: true })
+    //     .limit(1)
+    //     .maybeSingle()
+
+    //   if (originalAdmission?.referred_by_mobile) {
+    //     const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
+    //     if (referralAmt > 0) {
+    //       // Get the ID of the renewal row we just inserted
+    //       const { data: newRow } = await supabase
+    //         .schema('library_management')
+    //         .from('admission_responses')
+    //         .select('id')
+    //         .eq('mobile_number', student.mobile_number)
+    //         .order('id', { ascending: false })
+    //         .limit(1)
+    //         .maybeSingle()
+
+    //       await supabase.schema('library_management').from('referral_discounts').insert([{
+    //         referrer_mobile: originalAdmission.referred_by_mobile,
+    //         referred_mobile: student.mobile_number,
+    //         admission_id: newRow?.id || null,
+    //         amount: referralAmt,
+    //         status: 'pending',
+    //       }])
+    //     }
+    //   }
+    // }
 
     pingAppsScript()
     onSuccess(); onClose()
@@ -810,6 +1003,35 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
             })}
           </div>
         </div>
+
+        {/* ── REFERRAL DISCOUNT BANNER ─────────────────────────────────────── */}
+        {referralLoaded && pendingReferralAmount > 0 && (
+          <div className="mb-4 px-4 py-3 rounded-xl"
+            style={{
+              background: isReservedSeatRenew ? '#f0fdf4' : '#fefce8',
+              border: `1px solid ${isReservedSeatRenew ? '#86efac' : '#fde047'}`,
+            }}>
+            {isReservedSeatRenew ? (
+              <>
+                <p className="text-xs font-semibold" style={{ color: '#166534' }}>
+                  🎁 Referral discount of ₹{pendingReferralAmount} applied!
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>
+                  Original fees ₹{lookupFee(feeConfigs, seat, months) ?? '—'} — you pay ₹{Math.max(0, (lookupFee(feeConfigs, seat, months) ?? 0) - pendingReferralAmount)} after discount
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-semibold" style={{ color: '#854d0e' }}>
+                  🎁 You have ₹{pendingReferralAmount} referral discount pending
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: '#92400e' }}>
+                  Cannot claim for unreserved seat — switch to a reserved seat to use your discount
+                </p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Fees */}
         <FeesDisplay
@@ -964,6 +1186,16 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const [mode, setMode] = useState(draft.mode || 'Cash')
   const [comment, setComment] = useState(draft.comment || '')
 
+  // ── REFERRAL fields ────────────────────────────────────────────────────────
+  const [referralMobile, setReferralMobile] = useState('')
+  const [referrerStudent, setReferrerStudent] = useState<any | null>(null)
+  const [referrerLoading, setReferrerLoading] = useState(false)
+
+  const isReservedSeat = parseInt(seat) > 0
+  const referralValid = !!referrerStudent &&
+    referrerStudent.status?.toLowerCase().includes('active') &&
+    parseInt(referrerStudent.latest_seat) > 0
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
@@ -996,7 +1228,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
       const { data } = await supabase
         .schema('library_management')
         .from('fees_config')
-        .select('seat_type, months, amount')
+        .select('seat_type, months, amount, referral_amount')  // ← updated
         .eq('is_active', true)
         .order('seat_type')
         .order('months')
@@ -1035,6 +1267,36 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
       }
     }
   }, [seat, feeConfigs, feeConfigsLoading])
+
+  // ── Clear referral if seat changes to unreserved ───────────────────────────
+  useEffect(() => {
+    if (!isReservedSeat) {
+      setReferralMobile('')
+      setReferrerStudent(null)
+    }
+  }, [isReservedSeat])
+
+  // ── Referral mobile lookup ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isReservedSeat) return
+    if (referralMobile.length !== 10) { setReferrerStudent(null); return }
+    if (referralMobile === mobile) { setReferrerStudent(null); return }
+
+    let active = true
+    setReferrerLoading(true)
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from('v_student_summary')
+        .select('name, mobile_number, status, image_url, latest_seat')
+        .eq('mobile_number', referralMobile)
+        .maybeSingle()
+      if (active) {
+        setReferrerStudent(data || null)
+        setReferrerLoading(false)
+      }
+    }, 400)
+    return () => { active = false; clearTimeout(t) }
+  }, [referralMobile, mobile, isReservedSeat])
 
   useEffect(() => {
     const fetchRegId = async () => {
@@ -1161,7 +1423,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     const val = m.toString()
     setMonths(val)
     sd({ months: val })
-    // fees auto-resolve via useEffect
   }
 
   const handleToggleCustom = () => {
@@ -1233,7 +1494,6 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     if (isNaN(seatNum) || seatNum < 0 || seatNum > 92) { setError('Seat must be between 0 and 92.'); return }
     if (selectedShifts.length === 0) { setError('Please select at least one shift.'); return }
 
-    // Fee validation
     if (!finalFees) { setError('Fees are required.'); return }
     if (!feesOverride && !showCustom) {
       const expectedFee = lookupFee(feeConfigs, seat, months)
@@ -1251,6 +1511,10 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     if (!photoVerified || !photoUrl) { setError('Please verify the student photo before submitting.'); return }
 
     setSaving(true)
+
+    // Determine if referral is valid and should be saved
+    const referredByMobile = (isReservedSeat && referralValid && referralMobile) ? referralMobile : null
+
     const payload = {
       timestamp: now, name: name.trim(), mobile_number: mobile,
       admission: 'New', address: address.trim() || null, gender,
@@ -1260,11 +1524,27 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
       seat: seat.toString(), shift: selectedShifts.join(', '),
       final_fees: parseFloat(finalFees), fees_submitted: parseFloat(feesSubmitted),
       mode, register_id: regId, comment: comment.trim() || null, created_by: userName,
+      referred_by_mobile: referredByMobile,  // ← NEW
     }
 
-    const { error: insertError } = await supabase
-      .schema('library_management').from('admission_responses').insert([payload])
+    const { error: insertError, data: insertedRows } = await supabase
+      .schema('library_management').from('admission_responses').insert([payload]).select('id')
     if (insertError) { setError(insertError.message); setSaving(false); return }
+
+    // ── REFERRAL: Create pending discount row for referrer ─────────────────
+    if (referredByMobile) {
+      const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
+      if (referralAmt > 0) {
+        const admissionId = insertedRows?.[0]?.id || null
+        await supabase.schema('library_management').from('referral_discounts').insert([{
+          referrer_mobile: referredByMobile,
+          referred_mobile: mobile,
+          referred_reg_id: regId,
+          amount: referralAmt,
+          status: 'pending',
+        }])
+      }
+    }
 
     pingAppsScript()
     clearDraft()
@@ -1641,6 +1921,56 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
                 )
               })}
             </div>
+          </div>
+
+          {/* ── REFERRAL SECTION ──────────────────────────────────────────── */}
+          <SectionLabel>🤝 Referral (optional)</SectionLabel>
+
+          <div className="mb-4">
+            {!isReservedSeat ? (
+              <div className="px-4 py-3 rounded-xl text-center text-xs font-medium"
+                style={{ background: '#fafafa', border: `1px dashed ${T.borderHover}`, color: T.textMuted }}>
+                🔒 Referral is only available for reserved seats (seat &gt; 0)
+              </div>
+            ) : (
+              <>
+                <label className={labelCls} style={{ color: T.textSub }}>Referrer's Mobile Number</label>
+                <input
+                  type="tel"
+                  value={referralMobile}
+                  onChange={(e) => setReferralMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="Enter referrer's 10-digit mobile (optional)"
+                  maxLength={10}
+                  className={inputCls}
+                  style={inputStyle}
+                />
+                {referralMobile === mobile && mobile.length === 10 && (
+                  <p className="text-[10px] mt-1.5 font-medium" style={{ color: '#991b1b' }}>
+                    ❌ A student cannot refer themselves
+                  </p>
+                )}
+                {referrerLoading && (
+                  <p className="text-[10px] mt-1.5 font-medium animate-pulse" style={{ color: T.textMuted }}>
+                    Looking up referrer…
+                  </p>
+                )}
+                {!referrerLoading && referrerStudent && referralMobile !== mobile && (
+                  <div className="mt-2">
+                    <ReferrerCard student={referrerStudent} />
+                  </div>
+                )}
+                {!referrerLoading && referralMobile.length === 10 && !referrerStudent && referralMobile !== mobile && (
+                  <p className="text-[10px] mt-1.5 font-medium" style={{ color: '#991b1b' }}>
+                    ❌ No student found with this mobile number
+                  </p>
+                )}
+                {referralMobile.length === 0 && (
+                  <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
+                    Leave blank if no referral
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
           {/* Fees */}
