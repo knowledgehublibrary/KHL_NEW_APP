@@ -1491,17 +1491,32 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
     // ── REFERRAL: Create pending discount row for referrer ─────────────────
+    // if (referredByMobile) {
+    //   const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
+    //   if (referralAmt > 0) {
+    //     const admissionId = insertedRows?.[0]?.id || null
+    //     await supabase.schema('library_management').from('referral_discounts').insert([{
+    //       referrer_mobile: referredByMobile,
+    //       referred_mobile: mobile,
+    //       admission_id: admissionId,
+    //       amount: referralAmt,
+    //       status: 'pending',
+    //     }])
+    //   }
+    // }
+
     if (referredByMobile) {
       const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
       if (referralAmt > 0) {
         const admissionId = insertedRows?.[0]?.id || null
-        await supabase.schema('library_management').from('referral_discounts').insert([{
+        const { error: refErr } = await supabase.schema('library_management').from('referral_discounts').insert([{
           referrer_mobile: referredByMobile,
           referred_mobile: mobile,
           admission_id: admissionId,
           amount: referralAmt,
           status: 'pending',
         }])
+        console.log('Referral insert result:', { refErr, referralAmt, admissionId, referredByMobile })  // ← ADD THIS
       }
     }
 
