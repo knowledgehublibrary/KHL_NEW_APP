@@ -26,6 +26,7 @@ interface FeeConfig {
   seat_type: 'unreserved' | 'reserved'
   months: number
   amount: number
+  referral_amount: number  // ← NEW
 }
 
 function getSeatType(seat: string): 'unreserved' | 'reserved' {
@@ -39,6 +40,17 @@ function lookupFee(feeConfigs: FeeConfig[], seat: string, months: string): numbe
   if (isNaN(m)) return null
   const entry = feeConfigs.find(f => f.seat_type === seatType && f.months === m)
   return entry ? entry.amount : null
+}
+
+// ─── NEW: Look up referral_amount for a seat + months combo ──────────────────
+/** Returns 0 for unreserved or if not found */
+function lookupReferralAmount(feeConfigs: FeeConfig[], seat: string, months: string): number {
+  const seatType = getSeatType(seat)
+  if (seatType === 'unreserved') return 0
+  const m = parseInt(months)
+  if (isNaN(m)) return 0
+  const entry = feeConfigs.find(f => f.seat_type === seatType && f.months === m)
+  return entry ? (entry.referral_amount ?? 0) : 0
 }
 
 function getValidMonths(feeConfigs: FeeConfig[], seat: string): number[] {
@@ -211,7 +223,7 @@ function FeesDisplay({
         ) : showFeeReadonly ? (
           <div>
             <div className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={readonlyStyle}>
-              ₹{resolvedFee}
+              ₹{finalFees || resolvedFee}
             </div>
             <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
               {getSeatType(seat) === 'reserved' ? '🪑 Reserved' : '🔓 Unreserved'} · {months} month{parseInt(months) !== 1 ? 's' : ''}
@@ -312,6 +324,22 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+// ─── REFERRAL STATUS BADGE ─────────────────────────────────────────────────────
+function ReferralStatusBadge({ status }: { status: string }) {
+  const s = status?.toLowerCase() || ''
+  const isApplied = s === 'applied'
+  return (
+    <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider"
+      style={{
+        background: isApplied ? '#dcfce7' : '#fefce8',
+        color: isApplied ? '#166534' : '#854d0e',
+        border: `1px solid ${isApplied ? '#86efac' : '#fde047'}`,
+      }}>
+      {isApplied ? '✓ Applied' : '⏳ Pending'}
+    </span>
+  )
+}
+
 function ActionBtn({ onClick, color, bg, border, children, disabled }: any) {
   return (
     <button onClick={onClick} disabled={disabled}
@@ -351,7 +379,7 @@ function ModalSheet({ onClose, children, accentColor = T.accent }: {
   )
 }
 
-// ─── RENEW POPUP (updated — uses fees_config, same as main page) ──────────────
+// ─── RENEW POPUP (updated — uses fees_config + referral discounts, same as main page) ──
 function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   student: any; userName: string; role: string; onClose: () => void; onSuccess: () => void
 }) {
@@ -383,6 +411,11 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const [comment, setComment] = useState('')
   const now = new Date().toISOString()
 
+  // ── REFERRAL: pending discount for this student (as referrer) ─────────────
+  const [pendingReferralAmount, setPendingReferralAmount] = useState(0)
+  const [referralLoaded, setReferralLoaded] = useState(false)
+  const isReservedSeatRenew = parseInt(seat) > 0
+
   // ── Seat occupancy check ───────────────────────────────────────────────────
   const [seatOccupants, setSeatOccupants] = useState<any[]>([])
   const [seatChecking, setSeatChecking] = useState(false)
@@ -406,7 +439,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
       const { data } = await supabase
         .schema('library_management')
         .from('fees_config')
-        .select('seat_type, months, amount')
+        .select('seat_type, months, amount, referral_amount')  // ← updated
         .eq('is_active', true)
         .order('seat_type')
         .order('months')
@@ -415,6 +448,22 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     }
     load()
   }, [])
+
+  // ── Load pending referral discounts for this student ──────────────────────
+  useEffect(() => {
+    const loadReferral = async () => {
+      const { data } = await supabase
+        .schema('library_management')
+        .from('referral_discounts')
+        .select('amount')
+        .eq('referrer_mobile', student.mobile_number)
+        .eq('status', 'pending')
+      const total = (data || []).reduce((sum: number, r: any) => sum + (r.amount || 0), 0)
+      setPendingReferralAmount(total)
+      setReferralLoaded(true)
+    }
+    loadReferral()
+  }, [student.mobile_number])
 
   // ── Auto-resolve fees when seat/months/configs change ─────────────────────
   useEffect(() => {
@@ -428,6 +477,19 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
       setFeesSubmitted('')
     }
   }, [seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom])
+
+  // ── Auto-apply referral discount to fees_submitted (reserved seat only) ───
+  useEffect(() => {
+    if (!referralLoaded || pendingReferralAmount === 0) return
+    if (feesOverride || showCustom || feeConfigsLoading) return
+    if (!isReservedSeatRenew) return
+    const fee = lookupFee(feeConfigs, seat, months)
+    if (fee !== null) {
+      const discounted = Math.max(0, fee - pendingReferralAmount)
+      setFinalFees(discounted.toString())
+      setFeesSubmitted(discounted.toString())
+    }
+  }, [referralLoaded, pendingReferralAmount, seat, months, feeConfigs, feeConfigsLoading, feesOverride, showCustom, isReservedSeatRenew])
 
   // ── When seat type changes, reset months to first valid option ─────────────
   const prevSeatTypeRef = useRef<string>('')
@@ -541,6 +603,47 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     const { error: insertError } = await supabase.schema('library_management').from('admission_responses').insert([payload])
     if (insertError) { setError(insertError.message); setSaving(false); return }
 
+    // ── REFERRAL STEP 1: Apply pending discounts if reserved seat ─────────────
+    if (isReservedSeatRenew && pendingReferralAmount > 0) {
+      await supabase
+        .schema('library_management')
+        .from('referral_discounts')
+        .update({
+          status: 'applied',
+          applied_at: new Date().toISOString(),
+          referrer_reg_id: regId,  // ← this renewal's register_id
+        })
+        .eq('referrer_mobile', student.mobile_number)
+        .eq('status', 'pending')
+    }
+
+    // ── REFERRAL STEP 2: Credit referrer if this student was referred ─────────
+    if (isReservedSeatRenew) {
+      const { data: originalAdmission } = await supabase
+        .schema('library_management')
+        .from('admission_responses')
+        .select('referred_by_mobile, register_id')
+        .eq('mobile_number', student.mobile_number)
+        .eq('admission', 'New')
+        .not('referred_by_mobile', 'is', null)
+        .order('id', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      if (originalAdmission?.referred_by_mobile) {
+        const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
+        if (referralAmt > 0) {
+          await supabase.schema('library_management').from('referral_discounts').insert([{
+            referrer_mobile: originalAdmission.referred_by_mobile,
+            referred_mobile: student.mobile_number,
+            referred_reg_id: regId,  // ← this renewal's register_id
+            amount: referralAmt,
+            status: 'pending',
+          }])
+        }
+      }
+    }
+
     try {
       await fetch(APPS_SCRIPT_URL, { method: 'GET' })
     } catch (e) { console.warn('Apps Script call failed:', e) }
@@ -638,6 +741,35 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
             })}
           </div>
         </div>
+
+        {/* ── REFERRAL DISCOUNT BANNER ─────────────────────────────────────── */}
+        {referralLoaded && pendingReferralAmount > 0 && (
+          <div className="mb-4 px-4 py-3 rounded-xl"
+            style={{
+              background: isReservedSeatRenew ? '#f0fdf4' : '#fefce8',
+              border: `1px solid ${isReservedSeatRenew ? '#86efac' : '#fde047'}`,
+            }}>
+            {isReservedSeatRenew ? (
+              <>
+                <p className="text-xs font-semibold" style={{ color: '#166534' }}>
+                  🎁 Referral discount of ₹{pendingReferralAmount} applied!
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: '#16a34a' }}>
+                  Original fees ₹{lookupFee(feeConfigs, seat, months) ?? '—'} — you pay ₹{Math.max(0, (lookupFee(feeConfigs, seat, months) ?? 0) - pendingReferralAmount)} after discount
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-semibold" style={{ color: '#854d0e' }}>
+                  🎁 You have ₹{pendingReferralAmount} referral discount pending
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: '#92400e' }}>
+                  Cannot claim for unreserved seat — switch to a reserved seat to use your discount
+                </p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Fees */}
         <FeesDisplay
@@ -836,13 +968,17 @@ export default function StudentDetail() {
   const [showSeatPopup, setShowSeatPopup] = useState(false)
   const [seatAlreadyChanged, setSeatAlreadyChanged] = useState(false)
 
+  // ── REFERRAL HISTORY (this student as referrer) ────────────────────────────
+  const [referralHistory, setReferralHistory] = useState<any[]>([])
+  const [referralHistoryLoading, setReferralHistoryLoading] = useState(true)
+
   useEffect(() => {
     const init = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
       if (!sessionData.session) { router.push('/login'); return }
       const { data: profile } = await supabase.from('profiles').select('role, name').eq('id', sessionData.session.user.id).single()
       setRole(profile?.role || ''); setUserName(profile?.name || '')
-      if (mobile) { fetchStudent(); checkBlocked() }
+      if (mobile) { fetchStudent(); checkBlocked(); fetchReferralHistory() }
     }
     init()
   }, [mobile])
@@ -857,6 +993,39 @@ export default function StudentDetail() {
   async function checkBlocked() {
     const { data } = await supabase.schema('library_management').from('blocked').select('*').eq('mobile_number', mobile).single()
     if (data && !data.is_unblocked) setIsBlocked(true)
+  }
+
+  // ── Referral history: students this person referred + pending/applied amounts ──
+  async function fetchReferralHistory() {
+    setReferralHistoryLoading(true)
+    const { data: referrals } = await supabase
+      .schema('library_management')
+      .from('referral_discounts')
+      .select('*')
+      .eq('referrer_mobile', mobile)
+      .order('id', { ascending: false })
+
+    if (!referrals || referrals.length === 0) {
+      setReferralHistory([])
+      setReferralHistoryLoading(false)
+      return
+    }
+
+    const referredMobiles = Array.from(new Set(referrals.map((r: any) => r.referred_mobile)))
+    const { data: students } = await supabase
+      .from('v_student_summary')
+      .select('mobile_number, name')
+      .in('mobile_number', referredMobiles)
+
+    const nameMap = new Map((students || []).map((s: any) => [s.mobile_number, s.name]))
+
+    setReferralHistory(
+      referrals.map((r: any) => ({
+        ...r,
+        referred_name: nameMap.get(r.referred_mobile) || r.referred_mobile,
+      }))
+    )
+    setReferralHistoryLoading(false)
   }
 
   async function checkFreeze() {
@@ -957,6 +1126,14 @@ export default function StudentDetail() {
   const totalFees = displayData.reduce((s, r) => s + (r.final_fees || 0), 0)
   const totalPaid = displayData.reduce((s, r) => s + (r.fees_submitted || 0), 0)
   const totalDue = displayData.reduce((s, r) => s + (r.due_fees || 0), 0)
+
+  // ── Referral wallet totals ─────────────────────────────────────────────────
+  const pendingReferralWallet = referralHistory
+    .filter((r) => r.status === 'pending')
+    .reduce((s, r) => s + (r.amount || 0), 0)
+  const appliedReferralTotal = referralHistory
+    .filter((r) => r.status === 'applied')
+    .reduce((s, r) => s + (r.amount || 0), 0)
 
   const today = new Date()
   const expiryDate = new Date(latestRecord?.expiry)
@@ -1066,6 +1243,34 @@ export default function StudentDetail() {
           </div>
         </div>
 
+        {/* ── REFERRAL WALLET ── */}
+        {!referralHistoryLoading && referralHistory.length > 0 && (
+          <div className="rounded-2xl p-4 mb-4 flex items-center justify-between flex-wrap gap-3"
+            style={{ background: '#f0fdf4', border: '1px solid #86efac' }}>
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-semibold mb-1" style={{ color: '#166534' }}>
+                🎁 Referral Wallet
+              </p>
+              <p className="text-2xl font-bold" style={{ color: '#166534', fontFamily: "'Georgia', serif" }}>
+                ₹{pendingReferralWallet}
+                <span className="text-xs font-normal ml-2" style={{ color: '#16a34a' }}>
+                  {pendingReferralWallet > 0 ? 'available on next renewal' : 'no pending balance'}
+                </span>
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: '#fefce8', color: '#854d0e', border: '1px solid #fde047' }}>
+                {referralHistory.filter(r => r.status === 'pending').length} pending
+              </span>
+              <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac' }}>
+                ₹{appliedReferralTotal} redeemed lifetime
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* ── SUMMARY STATS ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           {[
@@ -1141,7 +1346,7 @@ export default function StudentDetail() {
         </div>
 
         {/* ── ADMISSION HISTORY TABLE ── */}
-        <div className="rounded-2xl overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        <div className="rounded-2xl overflow-hidden mb-4" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
           <div className="px-5 py-4" style={{ borderBottom: `1px solid ${T.border}` }}>
             <p className="text-sm font-semibold" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>Admission History</p>
           </div>
@@ -1208,6 +1413,46 @@ export default function StudentDetail() {
             </table>
           </div>
         </div>
+
+        {/* ── REFERRAL HISTORY TABLE ── */}
+        {!referralHistoryLoading && referralHistory.length > 0 && (
+          <div className="rounded-2xl overflow-hidden" style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+            <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: `1px solid ${T.border}` }}>
+              <p className="text-sm font-semibold" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>🤝 Referral History</p>
+              <span className="text-[10px] font-medium px-2.5 py-1 rounded-full"
+                style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.textSub }}>
+                {referralHistory.length} referral{referralHistory.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm" style={{ minWidth: '700px' }}>
+                <thead>
+                  <tr style={{ background: T.bg }}>
+                    {['Referred Student', 'Mobile', 'Amount', 'Reg ID', 'Status', 'Applied On'].map((h) => (
+                      <th key={h} className="text-left px-4 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                        style={{ color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {referralHistory.map((r, i) => (
+                    <tr key={r.id ?? `${r.referred_mobile}-${i}`}
+                      style={{ background: i % 2 === 0 ? T.surface : T.bg, borderBottom: `1px solid ${T.border}` }}>
+                      <td className="px-4 py-3 text-xs font-medium" style={{ color: T.text }}>{r.referred_name}</td>
+                      <td className="px-4 py-3 text-xs" style={{ color: T.textSub }}>{r.referred_mobile}</td>
+                      <td className="px-4 py-3 text-xs font-semibold" style={{ color: '#166534' }}>₹{r.amount}</td>
+                      <td className="px-4 py-3 text-xs font-mono whitespace-nowrap" style={{ color: T.textSub }}>{r.referred_reg_id || '—'}</td>
+                      <td className="px-4 py-3"><ReferralStatusBadge status={r.status} /></td>
+                      <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
+                        {r.applied_at ? formatDate(r.applied_at) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── SUBMIT DUE POPUP ── */}
@@ -1289,7 +1534,7 @@ export default function StudentDetail() {
           userName={userName}
           role={role}
           onClose={() => setShowRenewPopup(false)}
-          onSuccess={() => fetchStudent()}/>
+          onSuccess={() => { fetchStudent(); fetchReferralHistory() }}/>
       )}
 
       {showSeatPopup && (
