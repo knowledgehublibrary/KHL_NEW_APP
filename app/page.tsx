@@ -670,7 +670,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   useEffect(() => {
     const loadReferral = async () => {
       const { data } = await supabase
-        .schema('library_management')
         .from('referral_discounts')
         .select('amount')
         .eq('referrer_mobile', student.mobile_number)
@@ -822,7 +821,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     // ── REFERRAL STEP 1: Apply pending discounts if reserved seat ─────────────
     if (isReservedSeatRenew && pendingReferralAmount > 0) {
       await supabase
-        .schema('library_management')
         .from('referral_discounts')
         .update({ status: 'applied', applied_at: new Date().toISOString() })
         .eq('referrer_mobile', student.mobile_number)
@@ -856,7 +854,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
             .limit(1)
             .maybeSingle()
 
-          await supabase.schema('library_management').from('referral_discounts').insert([{
+          await supabase.from('referral_discounts').insert([{
             referrer_mobile: originalAdmission.referred_by_mobile,
             referred_mobile: student.mobile_number,
             admission_id: newRow?.id || null,
@@ -1495,7 +1493,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     //   const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
     //   if (referralAmt > 0) {
     //     const admissionId = insertedRows?.[0]?.id || null
-    //     await supabase.schema('library_management').from('referral_discounts').insert([{
+    //     await supabase.from('referral_discounts').insert([{
     //       referrer_mobile: referredByMobile,
     //       referred_mobile: mobile,
     //       admission_id: admissionId,
@@ -1509,7 +1507,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
       const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
       if (referralAmt > 0) {
         const admissionId = insertedRows?.[0]?.id || null
-        const { error: refErr } = await supabase.schema('library_management').from('referral_discounts').insert([{
+        const { error: refErr } = await supabase.from('referral_discounts').insert([{
           referrer_mobile: referredByMobile,
           referred_mobile: mobile,
           admission_id: admissionId,
