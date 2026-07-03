@@ -13,6 +13,26 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyxI48i0cFx3c4-
 const RENEW_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSc5KbtfqUpgRuohNyQdhVb-xahCRVTBizCXPobr0vyErzvX_Q/viewform'
 const PHOTO_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSfq6Ajw4dxXw1PiwLR_Bu6GhNccUXSRTSo6yQgj_2o6SpZDkw/viewform'
 const PHOTO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzX-eQ5-UcKiDY1Aa15KnXG52gEK33tkIVAXaWM8lN5CFxdnMyZXqVng0rfnfWYh-vG/exec'
+
+// ─── WHATSAPP INVITE CONFIG ─────────────────────────────────────────────────
+const GOOGLE_REVIEW_URL = 'https://g.co/kgs/iMBXRFr'
+const WHATSAPP_GROUP_MALE = 'https://chat.whatsapp.com/H23JTiAuQbN9TmlIQeA64z?s=cl&p=a&ilr=0&amv=3'
+const WHATSAPP_GROUP_FEMALE = 'https://chat.whatsapp.com/IlYbehz9Lgh8FaaEK2cSNd?s=cl&p=a&ilr=0&amv=3'
+const LIBRARY_CONTACT = '9329719892'
+
+function buildWhatsAppInviteMessage(name: string, gender: string) {
+  const groupLink = gender === 'Female' ? WHATSAPP_GROUP_FEMALE : WHATSAPP_GROUP_MALE
+  return `Hi ${name} 🙏
+Thank you for joining Knowledge Hub Library! We're delighted to have you with us. 📚✨
+Please join our WhatsApp group to stay updated with announcements, holidays & library updates: 👉 ${groupLink}
+📞 For any issues, reach us at: ${LIBRARY_CONTACT} ⭐ Loved your experience? Do rate us on Google: ${GOOGLE_REVIEW_URL}
+Discover, Learn & Grow with us!!🌟 — Knowledge Hub Library`
+}
+
+function getWhatsAppSendUrl(mobile: string, message: string) {
+  return `https://wa.me/91${mobile}?text=${encodeURIComponent(message)}`
+}
+
 const T = {
   bg: '#faf8f5', surface: '#ffffff',
   border: '#ede8e1', borderHover: '#ddd4c8',
@@ -162,6 +182,43 @@ function ConfirmModal({ message, confirmLabel = 'Confirm', danger = false, onCon
               {confirmLabel}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── WHATSAPP INVITE MODAL ────────────────────────────────────────────────────
+function InviteWhatsAppModal({ student, onClose }: {
+  student: { name: string; mobile: string; gender: string }; onClose: () => void
+}) {
+  const waUrl = getWhatsAppSendUrl(student.mobile, buildWhatsAppInviteMessage(student.name, student.gender))
+
+  const handleSend = () => {
+    window.open(waUrl, '_blank')
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4"
+      style={{ background: 'rgba(28,25,23,0.6)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl"
+        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+        <div className="h-[3px] rounded-t-2xl" style={{ background: 'linear-gradient(90deg, transparent, #25D366, transparent)' }} />
+        <div className="p-6 pb-[max(24px,env(safe-area-inset-bottom,24px))] text-center">
+          <p className="text-4xl mb-2">🎉</p>
+          <h3 className="font-bold text-lg mb-1" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
+            Admission Successful!
+          </h3>
+          <p className="text-sm mb-6" style={{ color: T.textSub }}>
+            Invite <span className="font-semibold" style={{ color: T.text }}>{student.name}</span> to our WhatsApp community
+          </p>
+          <button onClick={handleSend}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold"
+            style={{ background: '#25D366', color: 'white' }}>
+            📲 Send WhatsApp Invite
+          </button>
         </div>
       </div>
     </div>
@@ -860,53 +917,6 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         }
       }
     }
-    // // ── REFERRAL STEP 1: Apply pending discounts if reserved seat ─────────────
-    // if (isReservedSeatRenew && pendingReferralAmount > 0) {
-    //   await supabase
-    //     .schema('library_management')
-    //     .from('referral_discounts')
-    //     .update({ status: 'applied', applied_at: new Date().toISOString() })
-    //     .eq('referrer_mobile', student.mobile_number)
-    //     .eq('status', 'pending')
-    // }
-
-    // // ── REFERRAL STEP 2: Credit referrer if this student was referred ─────────
-    // // Look up the original admission row to find referred_by_mobile
-    // if (isReservedSeatRenew) {
-    //   const { data: originalAdmission } = await supabase
-    //     .schema('library_management')
-    //     .from('admission_responses')
-    //     .select('referred_by_mobile')
-    //     .eq('mobile_number', student.mobile_number)
-    //     .eq('admission', 'New')
-    //     .not('referred_by_mobile', 'is', null)
-    //     .order('id', { ascending: true })
-    //     .limit(1)
-    //     .maybeSingle()
-
-    //   if (originalAdmission?.referred_by_mobile) {
-    //     const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
-    //     if (referralAmt > 0) {
-    //       // Get the ID of the renewal row we just inserted
-    //       const { data: newRow } = await supabase
-    //         .schema('library_management')
-    //         .from('admission_responses')
-    //         .select('id')
-    //         .eq('mobile_number', student.mobile_number)
-    //         .order('id', { ascending: false })
-    //         .limit(1)
-    //         .maybeSingle()
-
-    //       await supabase.schema('library_management').from('referral_discounts').insert([{
-    //         referrer_mobile: originalAdmission.referred_by_mobile,
-    //         referred_mobile: student.mobile_number,
-    //         admission_id: newRow?.id || null,
-    //         amount: referralAmt,
-    //         status: 'pending',
-    //       }])
-    //     }
-    //   }
-    // }
 
     pingAppsScript()
     onSuccess(); onClose()
@@ -1139,7 +1149,8 @@ function clearDraft() {
 
 // ─── NEW ADMISSION POPUP ──────────────────────────────────────────────────────
 function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
-  userName: string; role: string; onClose: () => void; onSuccess: () => void
+  userName: string; role: string; onClose: () => void
+  onSuccess: (student: { name: string; mobile: string; gender: string }) => void
 }) {
   const isAdmin = role === 'admin'
   const draft = loadDraft()
@@ -1549,7 +1560,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     pingAppsScript()
     clearDraft()
     pollingRef.current?.stop()
-    onSuccess()
+    onSuccess({ name: name.trim(), mobile, gender })
     onClose()
   }
 
@@ -2076,6 +2087,7 @@ export default function Home() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [renewStudent, setRenewStudent] = useState<any | null>(null)
   const [showNewAdmission, setShowNewAdmission] = useState(false)
+  const [inviteStudent, setInviteStudent] = useState<{ name: string; mobile: string; gender: string } | null>(null)
 
   const [confirmModal, setConfirmModal] = useState<{
     message: string; confirmLabel: string; danger: boolean; onConfirm: () => void
@@ -2474,7 +2486,11 @@ export default function Home() {
           userName={userName}
           role={role}
           onClose={() => setShowNewAdmission(false)}
-          onSuccess={() => { cachedStudents = null; fetchStudents(true) }} />
+          onSuccess={(student) => {
+            cachedStudents = null
+            fetchStudents(true)
+            setInviteStudent(student)
+          }} />
       )}
 
       {renewStudent && (
@@ -2493,6 +2509,12 @@ export default function Home() {
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
           onCancel={() => setConfirmModal(null)} />
+      )}
+
+      {inviteStudent && (
+        <InviteWhatsAppModal
+          student={inviteStudent}
+          onClose={() => setInviteStudent(null)} />
       )}
     </>
   )
