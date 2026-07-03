@@ -352,7 +352,7 @@ function FeesDisplay({
         ) : showFeeReadonly ? (
           <div>
             <div className="px-3 py-2.5 rounded-xl text-sm font-semibold" style={readonlyStyle}>
-              ₹{resolvedFee}
+              ₹{finalFees || resolvedFee}
             </div>
             <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
               {getSeatType(seat) === 'reserved' ? '🪑 Reserved' : '🔓 Unreserved'} · {months} month{parseInt(months) !== 1 ? 's' : ''}
