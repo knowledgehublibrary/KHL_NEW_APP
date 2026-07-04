@@ -527,10 +527,11 @@ const StudentCard = memo(({
                 href={whatsappReminderLink}
                 target="_blank"
                 onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
-                className="flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold shrink-0"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                /* className="flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold shrink-0" */
                 style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', textDecoration: 'none' }}
               >
-                WhatsApp ↗
+                WhatsApp
               </a>
             )}
           </div>
