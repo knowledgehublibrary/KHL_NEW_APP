@@ -2358,6 +2358,12 @@ export default function Home() {
                       🏦 Admin Ledger
                     </Link>
                   )}
+                  {role === 'admin' && (
+                    <Link href="/referrals" className="px-3 py-2 rounded-xl text-xs font-medium"
+                      style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
+                      🤝 Referrals
+                    </Link>
+                  )}
                   <Link href="/expenses" className="px-3 py-2 rounded-xl text-xs font-medium"
                     style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.textSub }}>
                     💸 Expenses
