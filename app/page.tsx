@@ -216,13 +216,13 @@ function InviteWhatsAppModal({ student, onClose }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4"
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"
       style={{ background: 'rgba(28,25,23,0.6)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl"
+      <div className="w-full max-w-sm rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto"
         style={{ background: T.surface, border: `1px solid ${T.border}` }}>
         <div className="h-[3px] rounded-t-2xl" style={{ background: 'linear-gradient(90deg, transparent, #25D366, transparent)' }} />
-        <div className="p-6 pb-[max(24px,env(safe-area-inset-bottom,24px))] text-center">
+        <div className="p-6 text-center">
           <p className="text-4xl mb-2">🎉</p>
           <h3 className="font-bold text-lg mb-1" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
             Admission Successful!
@@ -925,7 +925,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         .eq('referrer_mobile', student.mobile_number)
         .eq('status', 'pending')
     }
-    
+
     // ── REFERRAL STEP 2: Credit referrer if this student was referred ─────────
     if (isReservedSeatRenew) {
       const { data: originalAdmission } = await supabase
@@ -938,7 +938,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         .order('id', { ascending: true })
         .limit(1)
         .maybeSingle()
-    
+
       if (originalAdmission?.referred_by_mobile) {
         const referralAmt = lookupReferralAmount(feeConfigs, seat, months)
         if (referralAmt > 0) {
