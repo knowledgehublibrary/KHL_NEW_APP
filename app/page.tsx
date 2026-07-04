@@ -530,7 +530,7 @@ const StudentCard = memo(({
                 className="flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold shrink-0"
                 style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', textDecoration: 'none' }}
               >
-                💬
+                WhatsApp ↗
               </a>
             )}
           </div>
