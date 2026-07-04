@@ -121,6 +121,22 @@ function formatExpiryDate(dateStr: string): string {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+// ─── WHATSAPP DUE/EXPIRY REMINDER LINK (same message logic as student detail page) ──
+function getWhatsappReminderLink(name: string, mobile: string, due: number, expiry: string) {
+  const today = new Date()
+  const exp = new Date(expiry)
+  let message = ''
+  if (due > 0 && exp < today) {
+    message = `Hi ${name}, your plan was *expired on ${formatExpiryDate(expiry)}* and your *last due fees is Rs.${due}*.`
+  } else if (due > 0) {
+    message = `Hi ${name}, your *due fees is Rs.${due}*.`
+  } else if (exp < today) {
+    message = `Hi ${name}, your plan was *expired on ${formatExpiryDate(expiry)}*. Renew today!!`
+  } else return ''
+  const finalMsg = `${message}\n_Knowledge Hub Library_\nhttps://g.co/kgs/iMBXRFr`
+  return `https://wa.me/91${mobile}?text=${encodeURIComponent(finalMsg)}`
+}
+
 /** Trim + convert any casing to Title Case */
 function toTitleCase(str: string): string {
   return str
@@ -468,6 +484,13 @@ const StudentCard = memo(({
       : s.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
         : '#dc2626'
 
+  const isExpiredCard = s.status?.toLowerCase().includes('expired')
+  const hasDueCard = s.total_due > 0
+  const showWhatsappReminder = isExpiredCard || hasDueCard
+  const whatsappReminderLink = showWhatsappReminder
+    ? getWhatsappReminderLink(s.name, s.mobile_number, s.total_due || 0, s.latest_expiry)
+    : ''
+
   const innerContent = (
     <>
       {selectable && (
@@ -499,6 +522,17 @@ const StudentCard = memo(({
             >
               📞 Call
             </a>
+            {showWhatsappReminder && whatsappReminderLink && (
+              <a
+                href={whatsappReminderLink}
+                target="_blank"
+                onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation() }}
+                className="flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold shrink-0"
+                style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', textDecoration: 'none' }}
+              >
+                💬
+              </a>
+            )}
           </div>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <StatusBadge status={s.status} />
