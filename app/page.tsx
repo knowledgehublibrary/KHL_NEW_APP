@@ -1008,7 +1008,10 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         </div>
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
-          <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} className={inputCls} style={inputStyle} />
+          <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)} 
+            min={toInputDate(new Date(Date.now() - 20 * 86400000).toISOString())}
+            max={toInputDate(new Date(Date.now() + 5 * 86400000).toISOString())}
+            className={inputCls} style={inputStyle} />
         </div>
 
         {/* Seat + Months side-by-side */}
@@ -1931,6 +1934,8 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
           <div className="mb-4">
             <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
             <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+              min={toInputDate(new Date(Date.now() - 20 * 86400000).toISOString())}
+              max={toInputDate(new Date(Date.now() + 5 * 86400000).toISOString())}
               className={inputCls} style={inputStyle} />
           </div>
 
