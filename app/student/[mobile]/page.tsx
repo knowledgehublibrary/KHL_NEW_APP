@@ -293,7 +293,10 @@ function isDateOlderThan20Days(dateStr: string) {
   if (!dateStr) return false
   return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 20
 }
-
+function isDateNewerThan5Days(dateStr: string) {
+  if (!dateStr) return false
+  return (new Date(dateStr).getTime() - Date.now()) / 86400000 > 5
+}
 function getWhatsappLink(name: string, mobile: string, due: number, expiry: string) {
   const today = new Date()
   const exp = new Date(expiry)
@@ -524,6 +527,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const handleStartDateChange = (val: string) => {
     setStartDate(val)
     if (val && isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days from today')
+    else if (val && isDateNewerThan5Days(val)) setError('Start date cannot be more than 5 days in the future')
     else if (error.includes('Start date')) setError('')
   }
 
@@ -587,6 +591,10 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     if (isDateOlderThan20Days(startDate)) {
       if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
       else setWarning(w => w ? w + ' Start date is older than 20 days.' : '⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    }
+    if (isDateNewerThan5Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be more than 5 days in the future'); return }
+      else setWarning(w => w ? w + ' Start date is more than 5 days in the future.' : '⚠️ Start date is more than 5 days in the future. Proceeding as admin override.')
     }
 
     if (!regId) { setError('Register ID not loaded. Please close and retry.'); return }
@@ -688,8 +696,9 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
           <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+            max={toInputDate(new Date(Date.now() + 5 * 86400000).toISOString())}
             className={inputCls} style={inputStyle}/>
-          <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Default: latest expiry. Cannot be older than 20 days.</p>
+          <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Default: latest expiry. Must be within 20 days past to 5 days future.</p>
         </div>
 
         {/* Seat + Months */}
