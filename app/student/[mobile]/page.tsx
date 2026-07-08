@@ -696,6 +696,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
         <div className="mb-4">
           <label className={labelCls} style={{ color: T.textSub }}>Start Date *</label>
           <input type="date" value={startDate} onChange={(e) => handleStartDateChange(e.target.value)}
+            min={toInputDate(new Date(Date.now() - 20 * 86400000).toISOString())}
             max={toInputDate(new Date(Date.now() + 5 * 86400000).toISOString())}
             className={inputCls} style={inputStyle}/>
           <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>Default: latest expiry. Must be within 20 days past to 5 days future.</p>
