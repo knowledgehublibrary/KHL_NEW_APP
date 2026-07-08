@@ -102,6 +102,11 @@ function isDateOlderThan20Days(dateStr: string) {
   return (Date.now() - new Date(dateStr).getTime()) / 86400000 > 20
 }
 
+function isDateNewerThan5Days(dateStr: string) {
+  if (!dateStr) return false
+  return (new Date(dateStr).getTime() - Date.now()) / 86400000 > 5
+}
+
 /** Days until expiry (positive = future, negative = already past, null = no date) */
 function getExpiryDiffDays(dateStr: string): number | null {
   if (!dateStr) return null
@@ -833,6 +838,7 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
   const handleStartDateChange = (val: string) => {
     setStartDate(val)
     if (isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days')
+    else if (isDateNewerThan5Days(val)) setError('Start date cannot be more than 5 days in the future')
     else if (error.includes('Start date')) setError('')
   }
 
@@ -896,6 +902,11 @@ function RenewPopup({ student, userName, role, onClose, onSuccess }: {
     if (isDateOlderThan20Days(startDate)) {
       if (!isAdmin) { setError('Start date cannot be older than 20 days'); return }
       else setWarning(w => w ? w + ' Start date is older than 20 days.' : '⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    }
+     
+    if (isDateNewerThan5Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be more than 5 days in the future'); return }
+      else setWarning(w => w ? w + ' Start date is more than 5 days in the future.' : '⚠️ Start date is more than 5 days. Proceeding as admin override.')
     }
 
     if (!regId) { setError('Register ID not loaded'); return }
@@ -1460,6 +1471,7 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
   const handleStartDateChange = (val: string) => {
     setStartDate(val); sd({ startDate: val })
     if (isDateOlderThan20Days(val)) setError('Start date cannot be older than 20 days')
+    else if (isDateNewerThan5Days(val)) setError('Start date cannot be more than 5 days in the future')
     else if (error.includes('Start date')) setError('')
   }
 
@@ -1534,6 +1546,10 @@ function NewAdmissionPopup({ userName, role, onClose, onSuccess }: {
     if (isDateOlderThan20Days(startDate)) {
       if (!isAdmin) { setError('Start date cannot be older than 20 days.'); return }
       else setWarning('⚠️ Start date is older than 20 days. Proceeding as admin override.')
+    } 
+    if (isDateNewerThan5Days(startDate)) {
+      if (!isAdmin) { setError('Start date cannot be more than 5 days in the future'); return }
+      else setWarning(w => w ? w + ' Start date is more than 5 days in the future.' : '⚠️ Start date is more than 5 days. Proceeding as admin override.')
     }
     if (!months || parseFloat(months) < 1) { setError('Months must be at least 1.'); return }
     const seatNum = parseInt(seat)
