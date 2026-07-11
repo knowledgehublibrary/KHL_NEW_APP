@@ -9,6 +9,7 @@ import Link from 'next/link'
 const T = {
   bg: '#faf8f5', surface: '#ffffff',
   border: '#ede8e1',
+  seatBorder: '#c9beac',
   accent: '#c47b3a', accentLight: '#fdf0e4', accentBorder: '#f0d4b0',
   text: '#1c1917', textSub: '#78716c', textMuted: '#a8a29e',
 }
@@ -233,19 +234,20 @@ export default function SeatMapPage() {
           </div>
         </div>
 
-        {/* ── STATUS CARDS ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-5">
+        {/* ── STATUS COUNT CHIPS — compact, one row, rectangular, non-clickable ── */}
+        <div className="flex flex-wrap gap-2 mb-5">
           {[
-            { label: 'Reserved',   sub: 'Active',   count: statusCounts.reservedActive,   color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
-            { label: 'Reserved',   sub: 'Expired',  count: statusCounts.reservedExpired,  color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
-            { label: 'Unreserved', sub: 'Active',   count: statusCounts.unreservedActive, color: T.accent,  bg: T.accentLight, border: T.accentBorder },
-            { label: 'Unreserved', sub: 'Expired',  count: statusCounts.unreservedExpired, color: '#78716c', bg: '#f5f5f4', border: '#e7e5e4' },
-          ].map(({ label, sub, count, color, bg, border }, i) => (
-            <div key={i} className="rounded-xl p-3 md:p-4" style={{ background: bg, border: `1px solid ${border}` }}>
-              <p className="text-[9px] md:text-[10px] uppercase tracking-widest font-semibold mb-0.5" style={{ color }}>{label}</p>
-              <p className="text-[9px] md:text-[10px] mb-1 md:mb-2" style={{ color, opacity: 0.7 }}>{sub}</p>
-              <p className="text-2xl md:text-3xl font-bold" style={{ color, fontFamily: "'Georgia', serif" }}>{count}</p>
-              <p className="text-[9px] md:text-[10px] mt-0.5 md:mt-1" style={{ color, opacity: 0.6 }}>students</p>
+            { label: 'Reserved · Active',    count: statusCounts.reservedActive,    color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+            { label: 'Reserved · Expired',   count: statusCounts.reservedExpired,   color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+            { label: 'Unreserved · Active',  count: statusCounts.unreservedActive,  color: T.accent,  bg: T.accentLight, border: T.accentBorder },
+            { label: 'Unreserved · Expired', count: statusCounts.unreservedExpired, color: '#78716c', bg: '#f5f5f4', border: '#e7e5e4' },
+          ].map(({ label, count, color, bg, border }, i) => (
+            <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold"
+              style={{ background: bg, border: `1px solid ${border}`, color }}>
+              <span>{label}</span>
+              <span className="px-1.5 py-0.5 text-[10px] font-bold" style={{ background: color, color: 'white' }}>
+                {count}
+              </span>
             </div>
           ))}
         </div>
@@ -341,26 +343,27 @@ export default function SeatMapPage() {
                       const hasConflict = conflictSeats.some(c => c.seat === seatNum)
                       const isVacantAll = slot.M.length === 0 && slot.A.length === 0 && slot.E.length === 0
 
-                      const outline = hasConflict ? '#eab308' : isHighlighted ? '#eab308' : T.border
+                      const outline = hasConflict ? '#eab308' : isHighlighted ? '#eab308' : T.seatBorder
 
                       return (
                         <div key={seatNum}
                           style={{
                             gridColumn, gridRow,
                             background: T.surface,
-                            border: `1px solid ${outline}`,
-                            borderRadius: '4px',
+                            border: `1.5px solid ${outline}`,
+                            borderRadius: '5px',
                             overflow: 'hidden',
+                            boxShadow: '0 1px 3px rgba(28,25,23,0.08)',
                           }}>
                           {/* Seat number band — flat, spreadsheet-style header cell */}
                           <div className="flex items-center justify-between px-1.5 py-0.5"
                             style={{
                               background: isVacantAll ? '#f1f5f9' : hasConflict ? '#fef08a' : T.accentLight,
-                              borderBottom: `1px solid ${outline}`,
+                              borderBottom: `1.5px solid ${outline}`,
                             }}>
                             <span className="font-bold"
                               style={{
-                                fontSize: '10px',
+                                fontSize: '12px',
                                 color: isVacantAll ? '#94a3b8' : hasConflict ? '#854d0e' : T.accent,
                                 fontFamily: "'Georgia', serif",
                               }}>
@@ -424,15 +427,12 @@ export default function SeatMapPage() {
 
       {/* ── UNRESERVED MODAL ── */}
       {showUnreservedModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full sm:max-w-lg max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl"
+          <div className="w-full max-w-lg max-h-[75vh] overflow-y-auto rounded-2xl shadow-2xl"
             style={{ background: T.surface, border: `1px solid ${T.border}` }}>
             <div className="h-[3px] rounded-t-2xl"
               style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-            <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
-            </div>
             <div className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -490,15 +490,12 @@ export default function SeatMapPage() {
 
       {/* ── CONFLICTS MODAL — one card per seat, not per shift ── */}
       {showConflictsModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full sm:max-w-lg max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl"
+          <div className="w-full max-w-lg max-h-[75vh] overflow-y-auto rounded-2xl shadow-2xl"
             style={{ background: T.surface, border: `1px solid ${T.border}` }}>
             <div className="h-[3px] rounded-t-2xl"
               style={{ background: `linear-gradient(90deg, transparent, #eab308, transparent)` }}/>
-            <div className="flex justify-center pt-3 sm:hidden">
-              <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
-            </div>
             <div className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
