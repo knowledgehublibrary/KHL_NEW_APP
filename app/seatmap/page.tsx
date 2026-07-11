@@ -23,17 +23,25 @@ const SHIFT_MAP: Record<string, string> = {
 // Reconstructed from the library's seating-plan sheet. Each entry is a column
 // (left → right, matching the room), listing seat numbers top → bottom exactly
 // as they're arranged on the floor. Columns are uneven lengths on purpose —
-// that's how the room is laid out. Total = 92 seats.
+// that's how the room is laid out. Total = 92 seats. `0` = a blank filler row
+// (an aisle/walkway gap in the room) — not a seat, just reserves the space.
 const SEAT_LAYOUT: number[][] = [
   [75, 76, 77, 78, 79, 80, 81, 82, 83, 84],
-  [74, 73, 72, 71, 70, 69, 68, 67, 66, 92],
-  [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 88, 89, 90, 91],
-  [55, 54, 53, 52, 51, 50, 49, 48, 47, 85, 86, 87, 46],
-  [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
-  [30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16],
-  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  [74, 73, 72, 71, 70, 69, 68, 67, 0, 66, 0, 0, 0, 0, 0, 92],
+  [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 0, 0, 88, 89, 90, 91],
+  [55, 54, 53, 52, 51, 50, 49, 0, 0, 48, 47, 0, 85, 86, 87, 46],
+  [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 0, 42, 43, 44, 45],
+  [30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 0, 19, 18, 17, 16],
+  [1, 2, 3, 4, 5, 6, 7, 8, 0, 9, 10, 11, 12, 13, 14, 15],
 ]
 const MAX_COL_LEN = Math.max(...SEAT_LAYOUT.map(c => c.length))
+
+// Maps each real column (0-indexed, left→right as in SEAT_LAYOUT) to a grid
+// track number. Extra numbers are skipped between groups to create wider
+// aisles: col1 | col2 | (col3+col4 tight) | (col5+col6 tight) | col7
+const COLUMN_TRACK = [1, 3, 5, 6, 8, 9, 11]
+const TOTAL_TRACKS = 11
+const SPACER_TRACKS = new Set([2, 4, 7, 10])
 
 type SlotOccupant = {
   name: string
@@ -300,23 +308,31 @@ export default function SeatMapPage() {
           <div className="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
             {(() => {
               const cardW = shiftView === 'all' ? 86 : 108
+              const spacerW = 16
               const rowsToShow = shiftView === 'all' ? (['M', 'A', 'E'] as const) : ([shiftView] as const)
+              const gridTemplateColumns = Array.from({ length: TOTAL_TRACKS }, (_, i) =>
+                SPACER_TRACKS.has(i + 1) ? `${spacerW}px` : `${cardW}px`
+              ).join(' ')
+              const totalWidth = Array.from({ length: TOTAL_TRACKS }, (_, i) =>
+                SPACER_TRACKS.has(i + 1) ? spacerW : cardW
+              ).reduce((a, b) => a + b, 0) + (TOTAL_TRACKS - 1) * 6
+
               return (
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: `repeat(${SEAT_LAYOUT.length}, ${cardW}px)`,
+                    gridTemplateColumns,
                     gridAutoRows: 'min-content',
                     gap: '6px',
-                    minWidth: `${SEAT_LAYOUT.length * (cardW + 6)}px`,
+                    minWidth: `${totalWidth}px`,
                   }}>
                   {SEAT_LAYOUT.map((col, ci) =>
                     Array.from({ length: MAX_COL_LEN }, (_, ri) => {
                       const seatNum = col[ri]
-                      const gridColumn = ci + 1
+                      const gridColumn = COLUMN_TRACK[ci]
                       const gridRow = ri + 1
 
-                      if (seatNum === undefined) {
+                      if (seatNum === undefined || seatNum === 0) {
                         return <div key={`${ci}-${ri}`} style={{ gridColumn, gridRow }} />
                       }
 
