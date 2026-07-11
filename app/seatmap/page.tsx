@@ -19,6 +19,22 @@ const SHIFT_MAP: Record<string, string> = {
   '6 PM - 11 PM': 'E',
 }
 
+// ── PHYSICAL SEAT LAYOUT ──
+// Reconstructed from the library's seating-plan sheet. Each entry is a column
+// (left → right, matching the room), listing seat numbers top → bottom exactly
+// as they're arranged on the floor. Columns are uneven lengths on purpose —
+// that's how the room is laid out. Total = 92 seats.
+const SEAT_LAYOUT: number[][] = [
+  [75, 76, 77, 78, 79, 80, 81, 82, 83, 84],
+  [74, 73, 72, 71, 70, 69, 68, 67, 66, 92],
+  [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 88, 89, 90, 91],
+  [55, 54, 53, 52, 51, 50, 49, 48, 47, 85, 86, 87, 46],
+  [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+  [30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16],
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+]
+const MAX_COL_LEN = Math.max(...SEAT_LAYOUT.map(c => c.length))
+
 type SlotOccupant = {
   name: string
   mobile: string
@@ -32,9 +48,19 @@ type SeatSlot = {
   E: SlotOccupant[]
 }
 
+type ConflictSeat = {
+  seat: number
+  shifts: ('M' | 'A' | 'E')[]
+  occupants: SlotOccupant[]
+}
+
 function isVisible(status: string) {
   const s = status?.toLowerCase() || ''
   return s.includes('active') || s.includes('expired')
+}
+
+function isExpiredStatus(status: string) {
+  return (status?.toLowerCase() || '').includes('expired')
 }
 
 function latestOccupant(occupants: SlotOccupant[]): SlotOccupant | null {
@@ -98,26 +124,43 @@ export default function SeatMapPage() {
     return map
   }, [records])
 
+  // ── CONFLICTS — grouped per seat (not per seat×shift) ──
   const conflictSeats = useMemo(() => {
-    const out: { seat: number; shift: string; occupants: SlotOccupant[] }[] = []
+    const bySeat: Record<number, ConflictSeat> = {}
     Object.entries(seatMap).forEach(([seatStr, slot]) => {
       const seat = parseInt(seatStr)
       ;(['M', 'A', 'E'] as const).forEach(sh => {
-        if (slot[sh].length > 1) out.push({ seat, shift: sh, occupants: slot[sh] })
+        if (slot[sh].length > 1) {
+          if (!bySeat[seat]) bySeat[seat] = { seat, shifts: [], occupants: [] }
+          bySeat[seat].shifts.push(sh)
+          slot[sh].forEach(o => {
+            if (!bySeat[seat].occupants.some(x => x.mobile === o.mobile)) {
+              bySeat[seat].occupants.push(o)
+            }
+          })
+        }
       })
     })
-    return out
+    return Object.values(bySeat).sort((a, b) => a.seat - b.seat)
   }, [seatMap])
 
-  const vacancies = useMemo(() => {
-    let M = 0, A = 0, E = 0
-    Object.values(seatMap).forEach(s => {
-      if (s.M.length === 0) M++
-      if (s.A.length === 0) A++
-      if (s.E.length === 0) E++
+  // ── STATUS COUNTS — replaces shift-wise vacancy cards ──
+  const statusCounts = useMemo(() => {
+    let reservedActive = 0, reservedExpired = 0, unreservedActive = 0, unreservedExpired = 0
+    records.forEach(r => {
+      const seatNum = parseInt(r.latest_seat)
+      const hasSeat = !isNaN(seatNum) && seatNum >= 1 && seatNum <= 92
+      const expired = isExpiredStatus(r.status)
+      if (hasSeat) {
+        if (expired) reservedExpired++
+        else reservedActive++
+      } else {
+        if (expired) unreservedExpired++
+        else unreservedActive++
+      }
     })
-    return { M, A, E, fullDay: Math.min(M, A, E) }
-  }, [seatMap])
+    return { reservedActive, reservedExpired, unreservedActive, unreservedExpired }
+  }, [records])
 
   const highlightedSeats = useMemo(() => {
     if (!search.trim()) return new Set<number>()
@@ -129,13 +172,6 @@ export default function SeatMapPage() {
     })
     return out
   }, [seatMap, search])
-
-  const rows = useMemo(() => {
-    const seats = Array.from({ length: 92 }, (_, i) => i + 1)
-    const out: number[][] = []
-    for (let i = 0; i < seats.length; i += 10) out.push(seats.slice(i, i + 10))
-    return out
-  }, [])
 
   const shiftFullName: Record<string, string> = { M: '6 AM – 12 PM', A: '12 PM – 6 PM', E: '6 PM – 11 PM' }
   const formatDate = (d: string) =>
@@ -164,7 +200,7 @@ export default function SeatMapPage() {
               <button onClick={() => setShowUnreservedModal(true)}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold"
                 style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, color: T.accent }}>
-                🪑 <span className="hidden sm:inline">Unreserved </span>
+                🪑 <span>Unreserved</span>
                 <span className="px-1.5 py-0.5 rounded-full font-bold text-[10px]"
                   style={{ background: T.accent, color: 'white' }}>{unreservedStudents.length}</span>
               </button>
@@ -189,19 +225,19 @@ export default function SeatMapPage() {
           </div>
         </div>
 
-        {/* ── VACANCY CARDS ── */}
+        {/* ── STATUS CARDS ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-5">
           {[
-            { label: '6 AM – 12 PM', key: 'M',  count: vacancies.M,       color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
-            { label: '12 PM – 6 PM', key: 'A',  count: vacancies.A,       color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
-            { label: '6 PM – 11 PM', key: 'E',  count: vacancies.E,       color: '#9333ea', bg: '#faf5ff', border: '#e9d5ff' },
-            { label: 'Full Day',     key: 'fd', count: vacancies.fullDay, color: T.accent,  bg: T.accentLight, border: T.accentBorder },
-          ].map(({ label, key, count, color, bg, border }) => (
-            <div key={key} className="rounded-xl p-3 md:p-4" style={{ background: bg, border: `1px solid ${border}` }}>
-              <p className="text-[9px] md:text-[10px] uppercase tracking-widest font-semibold mb-0.5" style={{ color }}>Vacant</p>
-              <p className="text-[9px] md:text-[10px] mb-1 md:mb-2" style={{ color, opacity: 0.7 }}>{label}</p>
+            { label: 'Reserved',   sub: 'Active',   count: statusCounts.reservedActive,   color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+            { label: 'Reserved',   sub: 'Expired',  count: statusCounts.reservedExpired,  color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+            { label: 'Unreserved', sub: 'Active',   count: statusCounts.unreservedActive, color: T.accent,  bg: T.accentLight, border: T.accentBorder },
+            { label: 'Unreserved', sub: 'Expired',  count: statusCounts.unreservedExpired, color: '#78716c', bg: '#f5f5f4', border: '#e7e5e4' },
+          ].map(({ label, sub, count, color, bg, border }, i) => (
+            <div key={i} className="rounded-xl p-3 md:p-4" style={{ background: bg, border: `1px solid ${border}` }}>
+              <p className="text-[9px] md:text-[10px] uppercase tracking-widest font-semibold mb-0.5" style={{ color }}>{label}</p>
+              <p className="text-[9px] md:text-[10px] mb-1 md:mb-2" style={{ color, opacity: 0.7 }}>{sub}</p>
               <p className="text-2xl md:text-3xl font-bold" style={{ color, fontFamily: "'Georgia', serif" }}>{count}</p>
-              <p className="text-[9px] md:text-[10px] mt-0.5 md:mt-1" style={{ color, opacity: 0.6 }}>of 92 seats</p>
+              <p className="text-[9px] md:text-[10px] mt-0.5 md:mt-1" style={{ color, opacity: 0.6 }}>students</p>
             </div>
           ))}
         </div>
@@ -257,17 +293,24 @@ export default function SeatMapPage() {
             <p className="text-sm" style={{ color: T.textMuted }}>Loading seats…</p>
           </div>
         ) : (
+          /* ── PHYSICAL FLOOR-PLAN GRID ──
+             Columns match the real room layout (see SEAT_LAYOUT above), not a
+             plain sequential 1–92 grid. Each column scrolls together; shorter
+             columns leave blank space at the bottom to keep rows aligned. */
           <div className="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
-            <div className="space-y-2 md:space-y-4" style={{ minWidth: '340px' }}>
-              {rows.map((row, ri) => (
-                <div key={ri} className="flex gap-1.5 md:gap-3">
-                  {row.map(seatNum => {
+            <div className="flex gap-1.5 md:gap-3" style={{ minWidth: '340px' }}>
+              {SEAT_LAYOUT.map((col, ci) => (
+                <div key={ci} className="flex flex-col gap-1.5 md:gap-3">
+                  {Array.from({ length: MAX_COL_LEN }, (_, ri) => {
+                    const seatNum = col[ri]
+                    if (seatNum === undefined) {
+                      return <div key={ri} style={{ width: shiftView === 'all' ? 86 : 108, height: 0 }} />
+                    }
                     const slot = seatMap[seatNum]
                     const isHighlighted = highlightedSeats.has(seatNum)
                     const hasConflict = conflictSeats.some(c => c.seat === seatNum)
                     const shiftsToShow = shiftView === 'all' ? (['M', 'A', 'E'] as const) : ([shiftView] as const)
                     const isVacantAll = slot.M.length === 0 && slot.A.length === 0 && slot.E.length === 0
-
                     const cardW = shiftView === 'all' ? 86 : 108
 
                     return (
@@ -307,7 +350,6 @@ export default function SeatMapPage() {
                             const display = latestOccupant(occupants)
                             const sc = slotColor(occupants)
 
-                            // Build the display label
                             const rawLabel = !display
                               ? '—'
                               : occupants.length > 1
@@ -319,7 +361,6 @@ export default function SeatMapPage() {
                                 style={{ background: sc.bg, border: `1px solid ${sc.border}` }}>
                                 <span style={{ fontSize: '8px', fontWeight: 700, color: sc.color, minWidth: '8px' }}>{sh}</span>
                                 {display ? (
-                                  // Clickable name — navigates to student profile
                                   <Link
                                     href={`/student/${display.mobile}`}
                                     className="truncate hover:underline"
@@ -387,7 +428,6 @@ export default function SeatMapPage() {
                     {unreservedStudents.map((r, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
                         <td className="px-3 py-2.5 text-xs font-medium" style={{ color: T.text }}>
-                          {/* Clickable name in unreserved modal */}
                           <Link
                             href={`/student/${r.mobile_number}`}
                             className="hover:underline"
@@ -397,10 +437,13 @@ export default function SeatMapPage() {
                           </Link>
                         </td>
                         <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.mobile_number}</td>
-                        <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.latest_shift || '—'}</td>
-                        <td className="px-3 py-2.5">
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                            style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                        <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.latest_shift}</td>
+                        <td className="px-3 py-2.5 text-xs">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                            style={{
+                              background: isExpiredStatus(r.status) ? '#fee2e2' : T.accentLight,
+                              color: isExpiredStatus(r.status) ? '#991b1b' : T.accent,
+                            }}>
                             {r.status}
                           </span>
                         </td>
@@ -414,14 +457,14 @@ export default function SeatMapPage() {
         </div>
       )}
 
-      {/* ── CONFLICTS MODAL ── */}
+      {/* ── CONFLICTS MODAL — one card per seat, not per shift ── */}
       {showConflictsModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
           style={{ background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl"
+          <div className="w-full sm:max-w-lg max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl"
             style={{ background: T.surface, border: `1px solid ${T.border}` }}>
             <div className="h-[3px] rounded-t-2xl"
-              style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
+              style={{ background: `linear-gradient(90deg, transparent, #eab308, transparent)` }}/>
             <div className="flex justify-center pt-3 sm:hidden">
               <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
             </div>
@@ -429,97 +472,58 @@ export default function SeatMapPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="font-bold text-base" style={{ color: T.text, fontFamily: "'Georgia', serif" }}>
-                    {conflictSeats.length > 0
-                      ? `⚠️ ${conflictSeats.length} Conflict${conflictSeats.length !== 1 ? 's' : ''}`
-                      : '✓ No Conflicts'}
+                    ⚠️ {conflictSeats.length} Conflict{conflictSeats.length !== 1 ? 's' : ''}
                   </h2>
                   <p className="text-xs mt-0.5" style={{ color: T.textMuted }}>
-                    {conflictSeats.length > 0
-                      ? 'Latest expiry is shown on the map · others listed below'
-                      : 'All seats properly allocated'}
+                    Seats double-booked for one or more shifts
                   </p>
                 </div>
                 <button onClick={() => setShowConflictsModal(false)} className="text-lg p-1" style={{ color: T.textMuted }}>✕</button>
               </div>
 
               {conflictSeats.length === 0 ? (
-                <div className="text-center py-10">
-                  <p className="text-4xl mb-3">✅</p>
-                  <p className="text-sm" style={{ color: T.textMuted }}>No duplicate seat assignments found</p>
-                </div>
+                <p className="text-sm text-center py-8" style={{ color: T.textMuted }}>No conflicts right now 🎉</p>
               ) : (
-                <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${T.border}` }}>
-                  <table className="w-full text-sm" style={{ minWidth: '480px' }}>
-                    <thead>
-                      <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-                        {['Seat', 'Shift', 'Student', 'Mobile', 'Expiry', 'Status'].map(h => (
-                          <th key={h} className="text-left px-3 py-2.5 text-[10px] uppercase tracking-widest font-semibold"
-                            style={{ color: T.textMuted }}>{h}</th>
+                <div className="space-y-3">
+                  {conflictSeats.map(c => (
+                    <div key={c.seat} className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid #fde68a' }}>
+                      <div className="px-3 py-2 flex items-center justify-between"
+                        style={{ background: '#fef9c3' }}>
+                        <span className="text-sm font-bold" style={{ color: '#854d0e', fontFamily: "'Georgia', serif" }}>
+                          Seat {c.seat}
+                        </span>
+                        <span className="text-[10px] font-semibold" style={{ color: '#854d0e' }}>
+                          {c.shifts.map(sh => shiftFullName[sh]).join(' · ')}
+                        </span>
+                      </div>
+                      <div style={{ background: T.surface }}>
+                        {c.occupants.map((o, i) => (
+                          <div key={i} className="px-3 py-2 flex items-center justify-between"
+                            style={{ borderTop: i > 0 ? `1px solid ${T.border}` : undefined }}>
+                            <div>
+                              <Link href={`/student/${o.mobile}`} className="text-xs font-medium hover:underline"
+                                style={{ color: T.accent }}
+                                onClick={() => setShowConflictsModal(false)}>
+                                {o.name}
+                              </Link>
+                              <p className="text-[10px]" style={{ color: T.textMuted }}>{o.mobile}</p>
+                            </div>
+                            <div className="text-right">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                                style={{
+                                  background: isExpiredStatus(o.status) ? '#fee2e2' : '#dcfce7',
+                                  color: isExpiredStatus(o.status) ? '#991b1b' : '#166534',
+                                }}>
+                                {o.status}
+                              </span>
+                              <p className="text-[9px] mt-0.5" style={{ color: T.textMuted }}>till {formatDate(o.expiry)}</p>
+                            </div>
+                          </div>
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {conflictSeats.map((conflict, ci) => {
-                        const sorted = [...conflict.occupants].sort(
-                          (a, b) => new Date(b.expiry).getTime() - new Date(a.expiry).getTime()
-                        )
-                        return sorted.map((occ, ni) => {
-                          const isExpired = occ.status?.toLowerCase().includes('expired')
-                          const isOnMap = ni === 0
-                          return (
-                            <tr key={`${ci}-${ni}`}
-                              style={{
-                                borderBottom: `1px solid ${T.border}`,
-                                background: isExpired ? '#fff5f5' : isOnMap ? '#f0fdf4' : T.surface,
-                              }}>
-                              {ni === 0 && (
-                                <td className="px-3 py-2.5 font-bold text-xs" rowSpan={sorted.length}
-                                  style={{ color: T.accent, verticalAlign: 'top' }}>
-                                  S-{conflict.seat}
-                                </td>
-                              )}
-                              {ni === 0 && (
-                                <td className="px-3 py-2.5 text-xs font-semibold whitespace-nowrap" rowSpan={sorted.length}
-                                  style={{ color: '#854d0e', verticalAlign: 'top' }}>
-                                  {shiftFullName[conflict.shift]}
-                                </td>
-                              )}
-                              <td className="px-3 py-2.5 text-xs">
-                                {/* Clickable name in conflicts modal */}
-                                <Link
-                                  href={`/student/${occ.mobile}`}
-                                  className="hover:underline font-medium"
-                                  style={{ color: T.text }}
-                                  onClick={() => setShowConflictsModal(false)}>
-                                  {occ.name}
-                                </Link>
-                                {isOnMap && (
-                                  <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                                    style={{ background: '#dcfce7', color: '#166534' }}>
-                                    on map
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{occ.mobile}</td>
-                              <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
-                                {formatDate(occ.expiry)}
-                              </td>
-                              <td className="px-3 py-2.5">
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
-                                  style={{
-                                    background: isExpired ? '#fee2e2' : '#dcfce7',
-                                    color: isExpired ? '#991b1b' : '#166534',
-                                    border: `1px solid ${isExpired ? '#fca5a5' : '#86efac'}`,
-                                  }}>
-                                  {occ.status}
-                                </span>
-                              </td>
-                            </tr>
-                          )
-                        })
-                      })}
-                    </tbody>
-                  </table>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
