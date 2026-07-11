@@ -88,6 +88,20 @@ function slotColor(occupants: SlotOccupant[]): { bg: string; color: string; bord
   return { bg: '#dcfce7', color: '#166534', border: '#86efac' }
 }
 
+// ── SHIFT DISPLAY SHORTHAND ──
+// Converts a raw "6 AM - 12 PM, 12 PM - 6 PM, 6 PM - 11 PM" style string into
+// a compact token: "All" if every shift is present, else "M, A" / "M" etc.
+// Prevents long wrapped text from stretching table rows.
+const SHIFT_ORDER: ('M' | 'A' | 'E')[] = ['M', 'A', 'E']
+function formatShiftDisplay(shiftStr: string) {
+  if (!shiftStr) return '—'
+  const codes = new Set(
+    shiftStr.split(',').map(s => SHIFT_MAP[s.trim()]).filter(Boolean)
+  )
+  if (codes.size === 3) return 'All'
+  return SHIFT_ORDER.filter(c => codes.has(c)).join(', ') || '—'
+}
+
 export default function SeatMapPage() {
   const [records, setRecords] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -468,7 +482,7 @@ export default function SeatMapPage() {
                           </Link>
                         </td>
                         <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.mobile_number}</td>
-                        <td className="px-3 py-2.5 text-xs" style={{ color: T.textSub }}>{r.latest_shift}</td>
+                        <td className="px-3 py-2.5 text-xs font-medium" style={{ color: T.textSub }}>{formatShiftDisplay(r.latest_shift)}</td>
                         <td className="px-3 py-2.5 text-xs">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
                             style={{
