@@ -298,89 +298,104 @@ export default function SeatMapPage() {
              plain sequential 1–92 grid. Each column scrolls together; shorter
              columns leave blank space at the bottom to keep rows aligned. */
           <div className="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
-            <div className="flex gap-1.5 md:gap-3" style={{ minWidth: '340px' }}>
-              {SEAT_LAYOUT.map((col, ci) => (
-                <div key={ci} className="flex flex-col gap-1.5 md:gap-3">
-                  {Array.from({ length: MAX_COL_LEN }, (_, ri) => {
-                    const seatNum = col[ri]
-                    if (seatNum === undefined) {
-                      return <div key={ri} style={{ width: shiftView === 'all' ? 86 : 108, height: 0 }} />
-                    }
-                    const slot = seatMap[seatNum]
-                    const isHighlighted = highlightedSeats.has(seatNum)
-                    const hasConflict = conflictSeats.some(c => c.seat === seatNum)
-                    const shiftsToShow = shiftView === 'all' ? (['M', 'A', 'E'] as const) : ([shiftView] as const)
-                    const isVacantAll = slot.M.length === 0 && slot.A.length === 0 && slot.E.length === 0
-                    const cardW = shiftView === 'all' ? 86 : 108
+            {(() => {
+              const cardW = shiftView === 'all' ? 86 : 108
+              const rowsToShow = shiftView === 'all' ? (['M', 'A', 'E'] as const) : ([shiftView] as const)
+              return (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${SEAT_LAYOUT.length}, ${cardW}px)`,
+                    gridAutoRows: 'min-content',
+                    gap: '6px',
+                    minWidth: `${SEAT_LAYOUT.length * (cardW + 6)}px`,
+                  }}>
+                  {SEAT_LAYOUT.map((col, ci) =>
+                    Array.from({ length: MAX_COL_LEN }, (_, ri) => {
+                      const seatNum = col[ri]
+                      const gridColumn = ci + 1
+                      const gridRow = ri + 1
 
-                    return (
-                      <div key={seatNum}
-                        style={{
-                          width: `${cardW}px`,
-                          minWidth: `${cardW}px`,
-                          background: isHighlighted ? '#fef9c3' : T.surface,
-                          border: `1px solid ${hasConflict ? '#fde68a' : isHighlighted ? '#fde68a' : T.border}`,
-                          boxShadow: hasConflict ? '0 0 0 2px #fde68a' : '0 1px 3px rgba(0,0,0,0.04)',
-                          borderRadius: '10px',
-                          overflow: 'hidden',
-                          flexShrink: 0,
-                        }}>
-                        {/* Seat header */}
-                        <div className="px-1.5 md:px-2.5 py-1 md:py-1.5 flex items-center justify-between"
+                      if (seatNum === undefined) {
+                        return <div key={`${ci}-${ri}`} style={{ gridColumn, gridRow }} />
+                      }
+
+                      const slot = seatMap[seatNum]
+                      const isHighlighted = highlightedSeats.has(seatNum)
+                      const hasConflict = conflictSeats.some(c => c.seat === seatNum)
+                      const isVacantAll = slot.M.length === 0 && slot.A.length === 0 && slot.E.length === 0
+
+                      const outline = hasConflict ? '#eab308' : isHighlighted ? '#eab308' : T.border
+
+                      return (
+                        <div key={seatNum}
                           style={{
-                            background: isVacantAll ? '#f8fafc' : hasConflict ? '#fef9c3' : T.accentLight,
-                            borderBottom: `1px solid ${isVacantAll ? '#e2e8f0' : hasConflict ? '#fde68a' : T.accentBorder}`,
+                            gridColumn, gridRow,
+                            background: T.surface,
+                            border: `1px solid ${outline}`,
+                            borderRadius: '4px',
+                            overflow: 'hidden',
                           }}>
-                          <span className="font-bold"
+                          {/* Seat number band — flat, spreadsheet-style header cell */}
+                          <div className="flex items-center justify-between px-1.5 py-0.5"
                             style={{
-                              fontSize: '10px',
-                              color: isVacantAll ? '#94a3b8' : hasConflict ? '#854d0e' : T.accent,
-                              fontFamily: "'Georgia', serif",
+                              background: isVacantAll ? '#f1f5f9' : hasConflict ? '#fef08a' : T.accentLight,
+                              borderBottom: `1px solid ${outline}`,
                             }}>
-                            {seatNum}
-                          </span>
-                          {isVacantAll && <span style={{ fontSize: '8px', color: '#cbd5e1' }}>—</span>}
-                          {hasConflict && <span style={{ fontSize: '9px', fontWeight: 700, color: '#854d0e' }}>⚠</span>}
+                            <span className="font-bold"
+                              style={{
+                                fontSize: '10px',
+                                color: isVacantAll ? '#94a3b8' : hasConflict ? '#854d0e' : T.accent,
+                                fontFamily: "'Georgia', serif",
+                              }}>
+                              {seatNum}
+                            </span>
+                            {hasConflict && <span style={{ fontSize: '9px', fontWeight: 700, color: '#854d0e' }}>⚠</span>}
+                          </div>
+
+                          {/* Shift rows — full-width flat fill, like an Excel cell, no pill/rounding */}
+                          <div>
+                            {rowsToShow.map(sh => {
+                              const occupants = slot[sh]
+                              const display = latestOccupant(occupants)
+                              const sc = slotColor(occupants)
+
+                              const rawLabel = !display
+                                ? '—'
+                                : occupants.length > 1
+                                  ? `${display.name.split(' ')[0]} +${occupants.length - 1}`
+                                  : display.name.split(' ')[0]
+
+                              return (
+                                <div key={sh} className="flex items-center gap-1 px-1.5"
+                                  style={{
+                                    background: sc.bg,
+                                    borderTop: `1px solid ${sc.border}`,
+                                    height: '20px',
+                                  }}>
+                                  <span style={{ fontSize: '8px', fontWeight: 700, color: sc.color, minWidth: '8px' }}>{sh}</span>
+                                  {display ? (
+                                    <Link
+                                      href={`/student/${display.mobile}`}
+                                      className="truncate hover:underline"
+                                      style={{ fontSize: '9px', color: sc.color, lineHeight: 1, flex: 1 }}
+                                      title={display.name}>
+                                      {rawLabel}
+                                    </Link>
+                                  ) : (
+                                    <span className="truncate" style={{ fontSize: '9px', color: sc.color, flex: 1 }}>—</span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
-
-                        {/* Shift slots */}
-                        <div className="p-1 space-y-0.5">
-                          {shiftsToShow.map(sh => {
-                            const occupants = slot[sh]
-                            const display = latestOccupant(occupants)
-                            const sc = slotColor(occupants)
-
-                            const rawLabel = !display
-                              ? '—'
-                              : occupants.length > 1
-                                ? `${display.name.split(' ')[0]} +${occupants.length - 1}`
-                                : display.name.split(' ')[0]
-
-                            return (
-                              <div key={sh} className="flex items-center gap-1 px-1 py-0.5 rounded"
-                                style={{ background: sc.bg, border: `1px solid ${sc.border}` }}>
-                                <span style={{ fontSize: '8px', fontWeight: 700, color: sc.color, minWidth: '8px' }}>{sh}</span>
-                                {display ? (
-                                  <Link
-                                    href={`/student/${display.mobile}`}
-                                    className="truncate hover:underline"
-                                    style={{ fontSize: '9px', color: sc.color, maxWidth: '60px', lineHeight: 1.3 }}
-                                    title={display.name}>
-                                    {rawLabel}
-                                  </Link>
-                                ) : (
-                                  <span className="truncate" style={{ fontSize: '9px', color: sc.color, maxWidth: '60px' }}>—</span>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })
+                  )}
                 </div>
-              ))}
-            </div>
+              )
+            })()}
           </div>
         )}
 
