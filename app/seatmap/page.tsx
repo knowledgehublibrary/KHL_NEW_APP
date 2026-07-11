@@ -220,7 +220,7 @@ export default function SeatMapPage() {
                 border: `1px solid ${conflictSeats.length > 0 ? '#fde68a' : T.border}`,
                 color: conflictSeats.length > 0 ? '#854d0e' : T.textSub,
               }}>
-              {conflictSeats.length > 0 ? '⚠️' : '✓'} <span className="hidden sm:inline">Conflicts </span>
+              {conflictSeats.length > 0 ? '⚠️ ' : '✓'} <span>Conflicts</span>
               {conflictSeats.length > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"
                   style={{ background: '#fde68a', color: '#854d0e' }}>{conflictSeats.length}</span>
