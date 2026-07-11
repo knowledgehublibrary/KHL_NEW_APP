@@ -39,9 +39,9 @@ const MAX_COL_LEN = Math.max(...SEAT_LAYOUT.map(c => c.length))
 // Maps each real column (0-indexed, left→right as in SEAT_LAYOUT) to a grid
 // track number. Extra numbers are skipped between groups to create wider
 // aisles: col1 | col2 | (col3+col4 tight) | (col5+col6 tight) | col7
-const COLUMN_TRACK = [1, 3, 5, 6, 8, 9, 11]
-const TOTAL_TRACKS = 11
-const SPACER_TRACKS = new Set([2, 4, 7, 10])
+const COLUMN_TRACK = [1, 3, 6, 7, 10, 11, 14]
+const TOTAL_TRACKS = 14
+const SPACER_TRACKS = new Set([2, 4, 5, 8, 9, 12, 13])
 
 type SlotOccupant = {
   name: string
