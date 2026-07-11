@@ -281,7 +281,7 @@ export default function SeatMapPage() {
         <div className="flex items-center gap-3 md:gap-5 mb-5 flex-wrap text-xs" style={{ color: T.textSub }}>
           {[
             { bg: '#dcfce7', border: '#86efac', label: 'Occupied' },
-            { bg: '#fee2e2', border: '#fca5a5', label: 'Blocked' },
+            { bg: '#fee2e2', border: '#fca5a5', label: 'Expied' },
             { bg: '#f1f5f9', border: '#e2e8f0', label: 'Vacant' },
             { bg: '#fef9c3', border: '#fde68a', label: 'Conflict' },
           ].map(({ bg, border, label }) => (
