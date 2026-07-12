@@ -138,22 +138,17 @@ function AddCashLogModal({ userName, onClose, onSuccess }: {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{
         background: 'rgba(28,25,23,0.55)',
         backdropFilter: 'blur(4px)',
         WebkitBackdropFilter: 'blur(4px)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
       }}>
       <div
-        className="relative w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl"
-        style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-        <div className="h-[3px] rounded-t-2xl"
+        className="relative w-full sm:max-w-md rounded-2xl shadow-2xl overflow-y-auto"
+        style={{ background: T.surface, border: `1px solid ${T.border}`, maxHeight: '85vh' }}>
+        <div className="h-[3px] rounded-t-2xl sticky top-0"
           style={{ background: `linear-gradient(90deg, transparent, ${T.accent}, transparent)` }}/>
-
-        <div className="flex justify-center pt-3 sm:hidden">
-          <div className="w-10 h-1 rounded-full" style={{ background: T.border }}/>
-        </div>
 
         <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between mb-5">
