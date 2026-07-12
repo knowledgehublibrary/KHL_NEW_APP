@@ -2352,9 +2352,11 @@ export default function Home() {
 
           <div className="flex justify-between items-start mb-6 flex-wrap gap-3">
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold"
-                style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
-                📚 Knowledge Hub Library
+              <h1 className="flex items-center gap-2 text-2xl md:text-3xl font-bold"
+                  style={{ color: T.text, fontFamily: "'Georgia', serif", letterSpacing: '-0.5px' }}>
+                  <img src="/default-avatar.png" alt="" width={28} height={28}
+                  style={{ objectFit: 'cover', borderRadius: '6px' }} />
+                  Knowledge Hub Library
               </h1>
               <p className="text-[10px] mt-1 tracking-[0.2em] uppercase font-medium" style={{ color: T.textMuted }}>Library Dashboard</p>
             </div>
