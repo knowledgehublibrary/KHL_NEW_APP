@@ -69,9 +69,9 @@ function TopMetricCard({ label, value, color, bg, border }: {
   label: string; value: string; color?: string; bg?: string; border?: string
 }) {
   return (
-    <div className="rounded-xl px-3 py-3" style={{ background: bg || T.surface, border: `1px solid ${border || T.border}` }}>
-      <p className="text-[9px] uppercase tracking-widest font-medium mb-1 truncate" style={{ color: T.textMuted }}>{label}</p>
-      <p className="text-base md:text-xl font-bold truncate" style={{ color: color || T.text, fontFamily: "'Georgia', serif" }}>{value}</p>
+    <div className="rounded-xl px-2.5 py-3 min-w-0" style={{ background: bg || T.surface, border: `1px solid ${border || T.border}` }}>
+      <p className="text-[9px] uppercase tracking-widest font-medium mb-1 whitespace-nowrap overflow-hidden text-ellipsis" style={{ color: T.textMuted }}>{label}</p>
+      <p className="font-bold leading-tight break-words" style={{ color: color || T.text, fontFamily: "'Georgia', serif", fontSize: 'clamp(0.8rem, 4vw, 1.25rem)' }}>{value}</p>
     </div>
   )
 }
@@ -689,8 +689,8 @@ export default function AdminLedgerPage() {
           </button>
         </div>
 
-        {/* ══ TOP METRICS — numbers only, single row ══ */}
-        <div className="grid grid-cols-4 gap-2 mb-3">
+        {/* ══ TOP METRICS — numbers only ══ */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
           <TopMetricCard
             label="📈 Net Profit"
             value={fmt(m.netProfit)}
@@ -737,13 +737,11 @@ export default function AdminLedgerPage() {
               <span className="text-xs font-medium" style={{ color: '#166534' }}>Balanced ✓</span>
             )}
           </div>
-          {!balanced(m.bankError) && (
-            <div className="mt-1.5 pl-7">
-              <span className="text-xs" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c' }}>
-                Still to check: {fmtSigned(m.stillToCheck)}
-              </span>
-            </div>
-          )}
+          <div className="mt-1.5 pl-7">
+            <span className="text-xs" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c' }}>
+              Still to check: {fmtSigned(m.stillToCheck)}
+            </span>
+          </div>
         </div>
 
         {/* ══ EDITABLE FIELDS (separated from Bank Reconciliation) ══ */}
