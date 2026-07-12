@@ -123,9 +123,9 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 overflow-hidden"
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-4 overflow-hidden"
                style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}`, boxShadow: `0 4px 20px ${T.accent}20` }}>
-               <img src="/default-avatar.png" alt="Knowledge Hub Library" width={40} height={40}
+               <img src="/default-avatar.png" alt="Knowledge Hub Library" width={64} height={64}
                style={{ objectFit: 'cover', borderRadius: '8px' }} />
           </div>
           <h1 className="font-bold mb-1" style={{ fontFamily: "'Georgia', serif", fontSize: '24px', color: T.text, letterSpacing: '-0.3px' }}>
