@@ -64,6 +64,18 @@ function MetricCard({ label, value, sub, color, bg, border, formula }: {
   )
 }
 
+// ─── TOP METRIC CARD (compact, numbers-only, single row) ──────────────────────
+function TopMetricCard({ label, value, color, bg, border }: {
+  label: string; value: string; color?: string; bg?: string; border?: string
+}) {
+  return (
+    <div className="rounded-xl px-3 py-3" style={{ background: bg || T.surface, border: `1px solid ${border || T.border}` }}>
+      <p className="text-[9px] uppercase tracking-widest font-medium mb-1 truncate" style={{ color: T.textMuted }}>{label}</p>
+      <p className="text-base md:text-xl font-bold truncate" style={{ color: color || T.text, fontFamily: "'Georgia', serif" }}>{value}</p>
+    </div>
+  )
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-6">
@@ -86,110 +98,6 @@ const inputBaseStyle: React.CSSProperties = {
 const labelCls  = "text-[10px] uppercase tracking-widest mb-1.5 block font-medium"
 const inputCls  = "w-full px-3 rounded-xl focus:outline-none"
 const inputHCls = "py-2.5"
-
-// ─── VIEW TOGGLE ──────────────────────────────────────────────────────────────
-function ViewToggle({ view, onChange }: { view: 'glance' | 'detailed'; onChange: (v: 'glance' | 'detailed') => void }) {
-  return (
-    <div
-      className="flex items-center rounded-xl p-1 gap-1"
-      style={{ background: T.bg, border: `1px solid ${T.border}` }}>
-      {(['glance', 'detailed'] as const).map((v) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          className="px-4 rounded-lg text-xs font-semibold capitalize transition-all"
-          style={{
-            minHeight: '34px',
-            touchAction: 'manipulation',
-            background: view === v ? T.surface : 'transparent',
-            color: view === v ? T.accent : T.textMuted,
-            border: view === v ? `1px solid ${T.border}` : '1px solid transparent',
-            boxShadow: view === v ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
-          }}>
-          {v === 'glance' ? '👁 Glance' : '📊 Detailed'}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ─── GLANCE VIEW ─────────────────────────────────────────────────────────────
-function GlanceView({ m, balanced }: { m: any; balanced: (v: number) => boolean }) {
-  const greenSet  = { color: '#166534', bg: '#f0fdf4', border: '#bbf7d0' }
-  const amberSet  = { color: '#92400e', bg: '#fefce8', border: '#fde68a' }
-  const blueSet   = { color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' }
-
-  return (
-    <div className="mb-6">
-      <p className="text-[10px] uppercase tracking-widest font-semibold mb-3" style={{ color: T.textMuted }}>
-        At a Glance
-      </p>
-
-      <div className="grid grid-cols-2 gap-2 md:gap-3 mb-2">
-        {/* Net Profit */}
-        <MetricCard
-          label="📈 Net Profit"
-          value={fmt(m.netProfit)}
-          formula="Opening + Fees − Exp"
-          color={m.netProfit >= 0 ? '#166534' : '#dc2626'}
-          bg={m.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'}
-          border={m.netProfit >= 0 ? '#bbf7d0' : '#fecaca'}
-        />
-        {/* Cash in Hand */}
-        <MetricCard
-          label="💰 Cash in Hand"
-          value={fmt(m.cashInHand)}
-          sub="Received − All Dr"
-          color={m.cashInHand >= 0 ? '#92400e' : '#dc2626'}
-          bg={m.cashInHand >= 0 ? '#fefce8' : '#fef2f2'}
-          border={m.cashInHand >= 0 ? '#fde68a' : '#fecaca'}
-        />
-        {/* Expected Bank */}
-        <MetricCard
-          label="🏦 Expected Bank"
-          value={fmt(m.expectedBankBalance)}
-          sub="Opening+Banked+Online−Exp"
-          {...blueSet}
-        />
-        {/* Remaining */}
-        <MetricCard
-          label="🔄 Remaining"
-          value={fmt(m.remainingToCollect)}
-          sub="Fees−InHand−ExpBank"
-          color={balanced(m.remainingToCollect) ? '#166534' : '#d97706'}
-          bg={balanced(m.remainingToCollect) ? '#f0fdf4' : '#fffbeb'}
-          border={balanced(m.remainingToCollect) ? '#bbf7d0' : '#fde68a'}
-        />
-      </div>
-
-      {/* Bank Error + Still to Check inline summary */}
-      <div
-        className="flex items-center gap-3 px-4 py-3 rounded-xl flex-wrap"
-        style={{
-          background: balanced(m.bankError) ? '#f0fdf4' : '#fef2f2',
-          border: `1px solid ${balanced(m.bankError) ? '#bbf7d0' : '#fecaca'}`,
-        }}>
-        <span className="text-sm" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626' }}>
-          {balanced(m.bankError) ? '✅' : '⚠️'}
-        </span>
-        <span className="text-xs font-semibold" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626' }}>
-          Bank Error: {fmtSigned(m.bankError)}
-        </span>
-        {!balanced(m.bankError) && (
-          <>
-            <span className="text-[10px]" style={{ color: T.textMuted }}>·</span>
-            <span className="text-xs" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c' }}>
-              Still to check: {fmtSigned(m.stillToCheck)}
-            </span>
-          </>
-        )}
-        {balanced(m.bankError) && (
-          <span className="text-xs font-medium" style={{ color: '#166534' }}>Balanced ✓</span>
-        )}
-      </div>
-    </div>
-  )
-}
 
 // ─── ADD CASH LOG MODAL ───────────────────────────────────────────────────────
 function AddCashLogModal({ userName, onClose, onSuccess }: {
@@ -377,11 +285,16 @@ function localMidnight(dateStr: string): Date {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, d, 0, 0, 0, 0)
 }
+// end-of-day boundary (start of the *next* day) so an "End Date" filter is inclusive
+function localEndOfDay(dateStr: string): Date {
+  const start = localMidnight(dateStr)
+  return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1, 0, 0, 0, 0)
+}
 function toDateInput(date: Date): string {
   return date.toISOString().split('T')[0]
 }
 
-// ─── COLLAPSIBLE TABLE WRAPPER ────────────────────────────────────────────────
+// ─── COLLAPSIBLE WRAPPER (used for tables AND the More Details panel) ─────────
 function CollapsibleTable({ toggleLabel, open, onToggle, children }: {
   toggleLabel: React.ReactNode
   open: boolean
@@ -414,6 +327,24 @@ function CollapsibleTable({ toggleLabel, open, onToggle, children }: {
   )
 }
 
+// ─── SEARCH INPUT (shared, small) ──────────────────────────────────────────────
+function SearchInput({ value, onChange, placeholder }: {
+  value: string; onChange: (v: string) => void; placeholder: string
+}) {
+  return (
+    <div className="relative flex-1 min-w-[160px]">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full pl-9 pr-3 rounded-xl focus:outline-none"
+        style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: T.textMuted }}>🔎</span>
+    </div>
+  )
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function AdminLedgerPage() {
   const router = useRouter()
@@ -421,11 +352,11 @@ export default function AdminLedgerPage() {
   const [loading, setLoading]             = useState(true)
   const [userName, setUserName]           = useState('')
   const [showCashModal, setShowCashModal] = useState(false)
-  const [view, setView]                   = useState<'glance' | 'detailed'>('glance')
 
-  const [showCashLog, setShowCashLog]     = useState(false)
-  const [showAdmTable, setShowAdmTable]   = useState(false)
-  const [showExpTable, setShowExpTable]   = useState(false)
+  const [showCashLog, setShowCashLog]         = useState(false)
+  const [showAdmTable, setShowAdmTable]       = useState(false)
+  const [showExpTable, setShowExpTable]       = useState(false)
+  const [showMoreDetails, setShowMoreDetails] = useState(false)
 
   const [admissionFees, setAdmissionFees] = useState<any[]>([])
   const [dueFees, setDueFees]             = useState<any[]>([])
@@ -435,7 +366,13 @@ export default function AdminLedgerPage() {
   const [expensesTable, setExpensesTable] = useState<any[]>([])
 
   const [admStartDate, setAdmStartDate]   = useState('')
+  const [admEndDate, setAdmEndDate]       = useState('')
   const [expStartDate, setExpStartDate]   = useState('')
+  const [expEndDate, setExpEndDate]       = useState('')
+
+  const [cashLogSearch, setCashLogSearch] = useState('')
+  const [admSearch, setAdmSearch]         = useState('')
+  const [expSearch, setExpSearch]         = useState('')
 
   const [realBankBalance, setRealBankBalance]   = useState('0')
   const [extraPaid, setExtraPaid]               = useState('0')
@@ -570,15 +507,44 @@ export default function AdminLedgerPage() {
     }
   }, [admissionFees, dueFees, expenses, cashLog, realBankBalance, extraPaid])
 
+  // ── Cash Log: search only (no date range requested for this table) ──
+  const filteredCashLog = useMemo(() => {
+    if (!cashLogSearch.trim()) return cashLog
+    const q = cashLogSearch.trim().toLowerCase()
+    return cashLog.filter(r =>
+      (r.description || '').toLowerCase().includes(q) ||
+      (r.created_by || '').toLowerCase().includes(q)
+    )
+  }, [cashLog, cashLogSearch])
+
+  // ── Admissions: start date + end date + name/reg-id search ──
   const filteredAdmissions = useMemo(() => {
-    if (!admStartDate) return admissions
-    const from = localMidnight(admStartDate)
-    return admissions.filter(r => {
-      const ts  = r.timestamp ? new Date(r.timestamp) : null
-      const due = r.due_fees_submitted_date ? new Date(r.due_fees_submitted_date) : null
-      return (ts && ts >= from) || (due && due >= from)
-    })
-  }, [admissions, admStartDate])
+    let rows = admissions
+    if (admStartDate) {
+      const from = localMidnight(admStartDate)
+      rows = rows.filter(r => {
+        const ts  = r.timestamp ? new Date(r.timestamp) : null
+        const due = r.due_fees_submitted_date ? new Date(r.due_fees_submitted_date) : null
+        return (ts && ts >= from) || (due && due >= from)
+      })
+    }
+    if (admEndDate) {
+      const to = localEndOfDay(admEndDate)
+      rows = rows.filter(r => {
+        const ts  = r.timestamp ? new Date(r.timestamp) : null
+        const due = r.due_fees_submitted_date ? new Date(r.due_fees_submitted_date) : null
+        return (ts && ts < to) || (due && due < to)
+      })
+    }
+    if (admSearch.trim()) {
+      const q = admSearch.trim().toLowerCase()
+      rows = rows.filter(r =>
+        (r.name || '').toLowerCase().includes(q) ||
+        (r.register_id || '').toLowerCase().includes(q)
+      )
+    }
+    return rows
+  }, [admissions, admStartDate, admEndDate, admSearch])
 
   const admSummary = useMemo(() => {
     let totalPaid = 0, cashPaid = 0, onlinePaid = 0
@@ -606,11 +572,23 @@ export default function AdminLedgerPage() {
     }
   }, [filteredAdmissions])
 
+  // ── Expenses: start date + end date + description search ──
   const filteredExpenses = useMemo(() => {
-    if (!expStartDate) return expensesTable
-    const from = localMidnight(expStartDate)
-    return expensesTable.filter(r => r.created_at && new Date(r.created_at) >= from)
-  }, [expensesTable, expStartDate])
+    let rows = expensesTable
+    if (expStartDate) {
+      const from = localMidnight(expStartDate)
+      rows = rows.filter(r => r.created_at && new Date(r.created_at) >= from)
+    }
+    if (expEndDate) {
+      const to = localEndOfDay(expEndDate)
+      rows = rows.filter(r => r.created_at && new Date(r.created_at) < to)
+    }
+    if (expSearch.trim()) {
+      const q = expSearch.trim().toLowerCase()
+      rows = rows.filter(r => (r.Description || '').toLowerCase().includes(q))
+    }
+    return rows
+  }, [expensesTable, expStartDate, expEndDate, expSearch])
 
   const expSummary = useMemo(() => {
     let total = 0, cash = 0, online = 0
@@ -695,36 +673,500 @@ export default function AdminLedgerPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* View Toggle */}
-            <ViewToggle view={view} onChange={setView} />
+          <button
+            onClick={() => setShowCashModal(true)}
+            className="flex items-center gap-2 px-4 rounded-xl text-sm font-semibold"
+            style={{
+              background: T.accent, color: 'white',
+              boxShadow: `0 2px 12px ${T.accent}50`,
+              minHeight: '44px',
+              touchAction: 'manipulation',
+            }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Cash Entry
+          </button>
+        </div>
+
+        {/* ══ TOP METRICS — numbers only, single row ══ */}
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          <TopMetricCard
+            label="📈 Net Profit"
+            value={fmt(m.netProfit)}
+            color={m.netProfit >= 0 ? '#166534' : '#dc2626'}
+            bg={m.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'}
+            border={m.netProfit >= 0 ? '#bbf7d0' : '#fecaca'}
+          />
+          <TopMetricCard
+            label="🏦 Expected Bank"
+            value={fmt(m.expectedBankBalance)}
+            {...blueSet}
+          />
+          <TopMetricCard
+            label="💰 Cash in Hand"
+            value={fmt(m.cashInHand)}
+            color={m.cashInHand >= 0 ? '#92400e' : '#dc2626'}
+            bg={m.cashInHand >= 0 ? '#fefce8' : '#fef2f2'}
+            border={m.cashInHand >= 0 ? '#fde68a' : '#fecaca'}
+          />
+          <TopMetricCard
+            label="🔄 Remaining"
+            value={fmtSigned(m.remainingToCollect)}
+            color={balanced(m.remainingToCollect) ? '#166534' : '#d97706'}
+            bg={balanced(m.remainingToCollect) ? '#f0fdf4' : '#fffbeb'}
+            border={balanced(m.remainingToCollect) ? '#bbf7d0' : '#fde68a'}
+          />
+        </div>
+
+        {/* ══ BANK ERROR + STILL TO CHECK STRIP (stacked) ══ */}
+        <div
+          className="px-4 py-3 rounded-xl mb-6"
+          style={{
+            background: balanced(m.bankError) ? '#f0fdf4' : '#fef2f2',
+            border: `1px solid ${balanced(m.bankError) ? '#bbf7d0' : '#fecaca'}`,
+          }}>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626' }}>
+              {balanced(m.bankError) ? '✅' : '⚠️'}
+            </span>
+            <span className="text-xs font-semibold" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626' }}>
+              Bank Error: {fmtSigned(m.bankError)}
+            </span>
+            {balanced(m.bankError) && (
+              <span className="text-xs font-medium" style={{ color: '#166534' }}>Balanced ✓</span>
+            )}
+          </div>
+          {!balanced(m.bankError) && (
+            <div className="mt-1.5 pl-7">
+              <span className="text-xs" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c' }}>
+                Still to check: {fmtSigned(m.stillToCheck)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* ══ EDITABLE FIELDS (separated from Bank Reconciliation) ══ */}
+        <Section title="Editable Fields">
+          <div className="rounded-2xl p-4 md:p-5"
+            style={{ background: T.surface, border: `1px solid ${T.border}` }}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>Real Bank Balance (₹)</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={realBankBalance}
+                  onChange={(e) => setRealBankBalance(e.target.value)}
+                  placeholder="0"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>Extra Paid (₹)</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={extraPaid}
+                  onChange={(e) => setExtraPaid(e.target.value)}
+                  placeholder="0"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Person</label>
+                <input
+                  type="text"
+                  value={extraPaidPerson}
+                  onChange={(e) => setExtraPaidPerson(e.target.value)}
+                  placeholder="Who paid extra?"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Reason</label>
+                <input
+                  type="text"
+                  value={extraPaidComment}
+                  onChange={(e) => setExtraPaidComment(e.target.value)}
+                  placeholder="Why was it paid?"
+                  className={`${inputCls} ${inputHCls}`}
+                  style={cfgInputStyle}/>
+              </div>
+              <div className="md:col-span-2">
+                <label className={labelCls} style={{ color: T.textSub }}>Notes</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Any observations or notes…"
+                  className={`${inputCls} py-2.5 resize-none`}
+                  style={cfgInputStyle}/>
+              </div>
+            </div>
 
             <button
-              onClick={() => setShowCashModal(true)}
-              className="flex items-center gap-2 px-4 rounded-xl text-sm font-semibold"
+              onClick={saveConfig}
+              disabled={savingConfig}
+              className="mt-4 px-6 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
               style={{
-                background: T.accent, color: 'white',
-                boxShadow: `0 2px 12px ${T.accent}50`,
+                background: configSaved ? '#16a34a' : T.accent,
+                color: 'white',
                 minHeight: '44px',
                 touchAction: 'manipulation',
               }}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
-              </svg>
-              Cash Entry
+              {savingConfig ? 'Saving…' : configSaved ? '✓ Saved!' : 'Save Changes'}
             </button>
+
+            {notes && (
+              <div className="mt-4 px-4 py-3 rounded-xl"
+                style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.accent }}>Notes</p>
+                <p className="text-sm" style={{ color: T.text }}>{notes}</p>
+              </div>
+            )}
           </div>
-        </div>
+        </Section>
 
-        {/* ══ GLANCE VIEW ══ */}
-        {view === 'glance' && (
-          <GlanceView m={m} balanced={balanced} />
-        )}
+        {/* ══ CASH LOG (collapsible) ══ */}
+        <CollapsibleTable
+          open={showCashLog}
+          onToggle={() => setShowCashLog(v => !v)}
+          toggleLabel={
+            <>
+              <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Cash Log</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                {cashLog.length} entries
+              </span>
+              <span className="text-xs font-semibold" style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
+              <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>Dr: {fmt(m.cashBanked)}</span>
+              <span className="text-xs font-semibold" style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>
+                In Hand: {fmt(m.cashInHand)}
+              </span>
+            </>
+          }>
+          <div className="p-4 border-b flex flex-wrap gap-3" style={{ borderColor: T.border }}>
+            <SearchInput value={cashLogSearch} onChange={setCashLogSearch} placeholder="Search description or staff…" />
+            {cashLogSearch.trim() && (
+              <span className="self-center text-xs" style={{ color: T.textMuted }}>{filteredCashLog.length} matching</span>
+            )}
+          </div>
+          {filteredCashLog.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-4xl mb-2">📋</p>
+              <p className="text-sm" style={{ color: T.textMuted }}>
+                {cashLog.length === 0 ? 'No cash log entries yet' : 'No entries match your search'}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <table className="w-full text-sm" style={{ minWidth: '480px' }}>
+                <thead>
+                  <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                    {['#', 'Date & Time', 'Type', 'Amount', 'Description', 'By'].map(h => (
+                      <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                        style={{ color: T.textMuted }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCashLog.map((row, i) => (
+                    <tr key={row.id} style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
+                      <td className="px-3 py-3">
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            background: row.type === 'Cr' ? '#f0fdf4' : '#fef2f2',
+                            color:      row.type === 'Cr' ? '#166534' : '#dc2626',
+                            border:     `1px solid ${row.type === 'Cr' ? '#bbf7d0' : '#fecaca'}`,
+                          }}>
+                          {row.type === 'Cr' ? '📥 Cr' : '📤 Dr'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-sm font-semibold" style={{ color: row.type === 'Cr' ? '#166534' : '#dc2626' }}>
+                        {fmt(row.amount)}
+                      </td>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.text }}>
+                        {row.description || <span style={{ color: T.textMuted }}>—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.textSub }}>{row.created_by}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: T.bg, borderTop: `2px solid ${T.border}` }}>
+                    <td colSpan={3} className="px-3 py-3 text-xs font-semibold" style={{ color: T.textMuted }}>Totals</td>
+                    <td colSpan={3} className="px-3 py-3">
+                      <div className="flex gap-3 text-xs font-semibold flex-wrap">
+                        <span style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
+                        <span style={{ color: '#dc2626' }}>Dr: {fmt(cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0))}</span>
+                        <span style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>In Hand: {fmt(m.cashInHand)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </CollapsibleTable>
 
-        {/* ══ DETAILED VIEW ══ */}
-        {view === 'detailed' && (
-          <>
-            {/* ══ SECTION 1: REVENUE ══ */}
+        {/* ══ ADMISSIONS (collapsible) ══ */}
+        <CollapsibleTable
+          open={showAdmTable}
+          onToggle={() => setShowAdmTable(v => !v)}
+          toggleLabel={
+            <>
+              <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Admissions</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                {filteredAdmissions.length} records
+              </span>
+              <span className="text-xs font-semibold" style={{ color: '#166534' }}>
+                Collected: {fmt(admSummary.totalCollected)}
+              </span>
+              {admSummary.totalDue > 0 && (
+                <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>
+                  Due: {fmt(admSummary.totalDue)}
+                </span>
+              )}
+            </>
+          }>
+          <div className="p-4 border-b" style={{ borderColor: T.border }}>
+            <div className="flex items-end gap-3 flex-wrap mb-4">
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
+                <input
+                  type="date"
+                  value={admStartDate}
+                  onChange={(e) => setAdmStartDate(e.target.value)}
+                  className="px-3 py-2 rounded-xl focus:outline-none"
+                  style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>To Date</label>
+                <input
+                  type="date"
+                  value={admEndDate}
+                  onChange={(e) => setAdmEndDate(e.target.value)}
+                  className="px-3 py-2 rounded-xl focus:outline-none"
+                  style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+              </div>
+              <SearchInput value={admSearch} onChange={setAdmSearch} placeholder="Search name or Reg ID…" />
+              <div className="pb-2">
+                <span className="text-xs" style={{ color: T.textMuted }}>{filteredAdmissions.length} records</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="rounded-xl p-3" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Records</p>
+                <p className="text-lg font-bold" style={{ color: T.accent, fontFamily: "'Georgia', serif" }}>{admSummary.count}</p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#166534' }}>Collected</p>
+                <p className="text-lg font-bold" style={{ color: '#16a34a', fontFamily: "'Georgia', serif" }}>{fmt(admSummary.totalCollected)}</p>
+                <p className="text-[10px] mt-0.5" style={{ color: '#4ade80' }}>💵 {fmt(admSummary.cashCollected)} · 📱 {fmt(admSummary.onlineCollected)}</p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#991b1b' }}>Pending Due</p>
+                <p className="text-lg font-bold" style={{ color: '#dc2626', fontFamily: "'Georgia', serif" }}>{fmt(admSummary.totalDue)}</p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Type</p>
+                <p className="text-xs font-bold mt-1" style={{ color: '#166534' }}>New: {filteredAdmissions.filter(r => r.admission === 'New').length}</p>
+                <p className="text-xs font-bold" style={{ color: T.accent }}>Renew: {filteredAdmissions.filter(r => r.admission === 'Renew').length}</p>
+              </div>
+            </div>
+          </div>
+
+          {filteredAdmissions.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-4xl mb-2">🗂️</p>
+              <p className="text-sm" style={{ color: T.textMuted }}>No admissions match your filters</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <table className="w-full text-sm" style={{ minWidth: '900px' }}>
+                <thead>
+                  <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                    {['#', 'Reg ID', 'Name', 'Type', 'Recorded On', 'Shift', 'Fees', 'Paid', 'Mode', 'Due Paid', 'Due Mode', 'Pending', 'Status'].map(h => (
+                      <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                        style={{ color: T.textMuted }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAdmissions.map((row, i) => (
+                    <tr key={row.register_id + i}
+                      className="transition-colors"
+                      style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
+                      <td className="px-3 py-3 text-xs font-mono font-medium" style={{ color: T.accent }}>
+                        <Link href={`/student/${row.mobile_number}`} className="hover:underline">{row.register_id}</Link>
+                      </td>
+                      <td className="px-3 py-3 text-sm font-medium whitespace-nowrap" style={{ color: T.text }}>
+                        <Link href={`/student/${row.mobile_number}`} className="hover:underline">{row.name}</Link>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            background: row.admission === 'New' ? '#f0fdf4' : T.accentLight,
+                            color: row.admission === 'New' ? '#166534' : T.accent,
+                            border: `1px solid ${row.admission === 'New' ? '#bbf7d0' : T.accentBorder}`,
+                          }}>
+                          {row.admission || 'New'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
+                        {row.timestamp ? new Date(row.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.shift}</td>
+                      <td className="px-3 py-3 text-xs font-medium" style={{ color: T.text }}>{fmt(row.final_fees || 0)}</td>
+                      <td className="px-3 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>{fmt(row.fees_submitted || 0)}</td>
+                      <td className="px-3 py-3">
+                        {row.mode
+                          ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                              style={{ background: row.mode === 'Cash' ? '#fefce8' : '#eff6ff', color: row.mode === 'Cash' ? '#854d0e' : '#1d4ed8', border: `1px solid ${row.mode === 'Cash' ? '#fde68a' : '#bfdbfe'}` }}>
+                              {row.mode}
+                            </span>
+                          : <span style={{ color: T.textMuted }}>—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-xs font-medium" style={{ color: (row.due_fees_submitted || 0) > 0 ? '#16a34a' : T.textMuted }}>
+                        {(row.due_fees_submitted || 0) > 0 ? fmt(row.due_fees_submitted) : '—'}
+                      </td>
+                      <td className="px-3 py-3">
+                        {row.due_fees_mode
+                          ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                              style={{ background: row.due_fees_mode === 'Cash' ? '#fefce8' : '#eff6ff', color: row.due_fees_mode === 'Cash' ? '#854d0e' : '#1d4ed8', border: `1px solid ${row.due_fees_mode === 'Cash' ? '#fde68a' : '#bfdbfe'}` }}>
+                              {row.due_fees_mode}
+                            </span>
+                          : <span style={{ color: T.textMuted }}>—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-xs font-medium" style={{ color: (row.due_fees || 0) > 0 ? '#dc2626' : T.textMuted }}>
+                        {(row.due_fees || 0) > 0 ? fmt(row.due_fees) : '—'}
+                      </td>
+                      <td className="px-3 py-3"><StatusBadge status={row.status}/></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CollapsibleTable>
+
+        {/* ══ EXPENSES (collapsible) ══ */}
+        <CollapsibleTable
+          open={showExpTable}
+          onToggle={() => setShowExpTable(v => !v)}
+          toggleLabel={
+            <>
+              <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Expenses</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
+                {filteredExpenses.length} records
+              </span>
+              <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>Total: {fmt(expSummary.total)}</span>
+              <span className="text-xs font-semibold" style={{ color: '#92400e' }}>💵 {fmt(expSummary.cash)}</span>
+              <span className="text-xs font-semibold" style={{ color: '#1d4ed8' }}>📱 {fmt(expSummary.online)}</span>
+            </>
+          }>
+          <div className="p-4 border-b" style={{ borderColor: T.border }}>
+            <div className="flex items-end gap-3 flex-wrap mb-4">
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
+                <input
+                  type="date"
+                  value={expStartDate}
+                  onChange={(e) => setExpStartDate(e.target.value)}
+                  className="px-3 py-2 rounded-xl focus:outline-none"
+                  style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+              </div>
+              <div>
+                <label className={labelCls} style={{ color: T.textSub }}>To Date</label>
+                <input
+                  type="date"
+                  value={expEndDate}
+                  onChange={(e) => setExpEndDate(e.target.value)}
+                  className="px-3 py-2 rounded-xl focus:outline-none"
+                  style={{ ...inputBaseStyle, minHeight: '44px' }}/>
+              </div>
+              <SearchInput value={expSearch} onChange={setExpSearch} placeholder="Search description…" />
+              <div className="pb-2">
+                <span className="text-xs" style={{ color: T.textMuted }}>{filteredExpenses.length} records</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl p-3" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#991b1b' }}>Total Spent</p>
+                <p className="text-lg font-bold" style={{ color: '#dc2626', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.total)}</p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: '#fefce8', border: '1px solid #fde68a' }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#854d0e' }}>💵 Cash</p>
+                <p className="text-lg font-bold" style={{ color: '#92400e', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.cash)}</p>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#1d4ed8' }}>📱 Online</p>
+                <p className="text-lg font-bold" style={{ color: '#1d4ed8', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.online)}</p>
+              </div>
+            </div>
+          </div>
+
+          {filteredExpenses.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-4xl mb-2">🧾</p>
+              <p className="text-sm" style={{ color: T.textMuted }}>No expenses match your filters</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <table className="w-full text-sm" style={{ minWidth: '480px' }}>
+                <thead>
+                  <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                    {['#', 'Date & Time', 'Description', 'Amount', 'Mode', 'By'].map(h => (
+                      <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
+                        style={{ color: T.textMuted }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredExpenses.map((row, i) => (
+                    <tr key={row.id}
+                      className="transition-colors"
+                      style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
+                      <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.text, maxWidth: '200px' }}>{row.Description}</td>
+                      <td className="px-3 py-3 text-sm font-semibold" style={{ color: '#dc2626' }}>{fmt(row.Amount || 0)}</td>
+                      <td className="px-3 py-3">
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            background: row.Mode === 'Cash' ? '#fefce8' : '#eff6ff',
+                            color: row.Mode === 'Cash' ? '#854d0e' : '#1d4ed8',
+                            border: `1px solid ${row.Mode === 'Cash' ? '#fde68a' : '#bfdbfe'}`,
+                          }}>
+                          {row.Mode}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs" style={{ color: T.textSub }}>{row.Created_by}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CollapsibleTable>
+
+        {/* ══ MORE DETAILS — all formulas & breakdowns, on-demand, at the very bottom ══ */}
+        <CollapsibleTable
+          open={showMoreDetails}
+          onToggle={() => setShowMoreDetails(v => !v)}
+          toggleLabel={
+            <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>
+              📊 More Details — Revenue, Expenses, Net Profit, Cash Flow & Bank Reconciliation
+            </span>
+          }>
+          <div className="p-4 md:p-5">
+            {/* Revenue */}
             <Section title="Revenue — all-time fees collected">
               <div className="grid grid-cols-3 gap-2 md:gap-3">
                 <MetricCard label="💵 Cash Fees"  value={fmt(m.cashFees)}   {...amberSet}/>
@@ -733,7 +1175,7 @@ export default function AdminLedgerPage() {
               </div>
             </Section>
 
-            {/* ══ SECTION 2: EXPENSES ══ */}
+            {/* Expenses */}
             <Section title="Expenses — all-time">
               <div className="grid grid-cols-3 gap-2 md:gap-3">
                 <MetricCard label="💵 Cash Exp"   value={fmt(m.cashExpenses)}   {...amberSet}/>
@@ -742,7 +1184,7 @@ export default function AdminLedgerPage() {
               </div>
             </Section>
 
-            {/* ══ SECTION 3: NET PROFIT ══ */}
+            {/* Net Profit breakdown */}
             <Section title="Net Profit">
               <div className="grid grid-cols-3 gap-2 md:gap-3">
                 <MetricCard label="Opening" value={fmt(LAST_NET)} color={T.textSub} sub="Constant"/>
@@ -761,7 +1203,7 @@ export default function AdminLedgerPage() {
               </div>
             </Section>
 
-            {/* ══ SECTION 4: CASH FLOW ══ */}
+            {/* Cash Flow */}
             <Section title="Cash Flow — from cash log entries">
               <div className="grid grid-cols-3 gap-2 md:gap-3">
                 <MetricCard label="📥 Received (Cr)" value={fmt(m.cashReceived)} sub="Sum of Cr entries" {...greenSet}/>
@@ -776,418 +1218,47 @@ export default function AdminLedgerPage() {
               </div>
             </Section>
 
-            {/* ══ SECTION 5: BANK RECONCILIATION ══ */}
+            {/* Bank Reconciliation — fixed figures + formulas */}
             <Section title="Bank Reconciliation">
-              <div className="rounded-2xl p-4 md:p-5"
-                style={{ background: T.surface, border: `1px solid ${T.border}` }}>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 mb-6">
-                  <MetricCard label="Opening Bank"  value={fmt(LAST_BANK_BALANCE)} color={T.textSub} sub="Constant"/>
-                  <MetricCard label="Expected Bank" value={fmt(m.expectedBankBalance)} sub="Opening+Banked+Online−OnlineExp" {...blueSet}/>
-                  <MetricCard
-                    label="Remaining"
-                    value={fmt(m.remainingToCollect)}
-                    sub="Fees−InHand−ExpBank"
-                    color={balanced(m.remainingToCollect) ? '#166534' : '#d97706'}
-                    bg={balanced(m.remainingToCollect) ? '#f0fdf4' : '#fffbeb'}
-                    border={balanced(m.remainingToCollect) ? '#bbf7d0' : '#fde68a'}/>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 mb-4">
+                <MetricCard label="Opening Bank"  value={fmt(LAST_BANK_BALANCE)} color={T.textSub} sub="Constant"/>
+                <MetricCard label="Expected Bank" value={fmt(m.expectedBankBalance)} sub="Opening+Banked+Online−OnlineExp" {...blueSet}/>
+                <MetricCard
+                  label="Remaining"
+                  value={fmtSigned(m.remainingToCollect)}
+                  sub="Fees−InHand−ExpBank"
+                  color={balanced(m.remainingToCollect) ? '#166534' : '#d97706'}
+                  bg={balanced(m.remainingToCollect) ? '#f0fdf4' : '#fffbeb'}
+                  border={balanced(m.remainingToCollect) ? '#bbf7d0' : '#fde68a'}/>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 md:gap-3">
+                <div className="rounded-xl p-4" style={{
+                  background: balanced(m.bankError) ? '#f0fdf4' : '#fef2f2',
+                  border: `1px solid ${balanced(m.bankError) ? '#bbf7d0' : '#fecaca'}`,
+                }}>
+                  <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Bank Error</p>
+                  <p className="text-xl font-bold" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626', fontFamily: "'Georgia', serif" }}>
+                    {fmtSigned(m.bankError)}
+                  </p>
+                  <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted }}>Real − Expected</p>
+                  {balanced(m.bankError) && <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✓ Balanced</p>}
                 </div>
-
-                <div className="border-t mb-5" style={{ borderColor: T.border }}/>
-
-                <p className="text-[10px] uppercase tracking-widest font-semibold mb-4" style={{ color: T.textMuted }}>
-                  Editable Fields
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls} style={{ color: T.textSub }}>Real Bank Balance (₹)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={realBankBalance}
-                      onChange={(e) => setRealBankBalance(e.target.value)}
-                      placeholder="0"
-                      className={`${inputCls} ${inputHCls}`}
-                      style={cfgInputStyle}/>
-                  </div>
-                  <div>
-                    <label className={labelCls} style={{ color: T.textSub }}>Extra Paid (₹)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={extraPaid}
-                      onChange={(e) => setExtraPaid(e.target.value)}
-                      placeholder="0"
-                      className={`${inputCls} ${inputHCls}`}
-                      style={cfgInputStyle}/>
-                  </div>
-                  <div>
-                    <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Person</label>
-                    <input
-                      type="text"
-                      value={extraPaidPerson}
-                      onChange={(e) => setExtraPaidPerson(e.target.value)}
-                      placeholder="Who paid extra?"
-                      className={`${inputCls} ${inputHCls}`}
-                      style={cfgInputStyle}/>
-                  </div>
-                  <div>
-                    <label className={labelCls} style={{ color: T.textSub }}>Extra Paid — Reason</label>
-                    <input
-                      type="text"
-                      value={extraPaidComment}
-                      onChange={(e) => setExtraPaidComment(e.target.value)}
-                      placeholder="Why was it paid?"
-                      className={`${inputCls} ${inputHCls}`}
-                      style={cfgInputStyle}/>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className={labelCls} style={{ color: T.textSub }}>Notes</label>
-                    <textarea
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      rows={2}
-                      placeholder="Any observations or notes…"
-                      className={`${inputCls} py-2.5 resize-none`}
-                      style={cfgInputStyle}/>
-                  </div>
+                <div className="rounded-xl p-4" style={{
+                  background: balanced(m.stillToCheck) ? '#f0fdf4' : '#fff7ed',
+                  border: `1px solid ${balanced(m.stillToCheck) ? '#bbf7d0' : '#fed7aa'}`,
+                }}>
+                  <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Still To Check</p>
+                  <p className="text-xl font-bold" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c', fontFamily: "'Georgia', serif" }}>
+                    {fmtSigned(m.stillToCheck)}
+                  </p>
+                  <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted }}>Bank Error − Extra Paid</p>
+                  {balanced(m.stillToCheck) && <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✓ All accounted for</p>}
                 </div>
-
-                <button
-                  onClick={saveConfig}
-                  disabled={savingConfig}
-                  className="mt-4 px-6 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
-                  style={{
-                    background: configSaved ? '#16a34a' : T.accent,
-                    color: 'white',
-                    minHeight: '44px',
-                    touchAction: 'manipulation',
-                  }}>
-                  {savingConfig ? 'Saving…' : configSaved ? '✓ Saved!' : 'Save Changes'}
-                </button>
-
-                <div className="grid grid-cols-2 gap-2 md:gap-3 mt-6">
-                  <div className="rounded-xl p-4" style={{
-                    background: balanced(m.bankError) ? '#f0fdf4' : '#fef2f2',
-                    border: `1px solid ${balanced(m.bankError) ? '#bbf7d0' : '#fecaca'}`,
-                  }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Bank Error</p>
-                    <p className="text-xl font-bold" style={{ color: balanced(m.bankError) ? '#166534' : '#dc2626', fontFamily: "'Georgia', serif" }}>
-                      {fmtSigned(m.bankError)}
-                    </p>
-                    <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted }}>Real − Expected</p>
-                    {balanced(m.bankError) && <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✓ Balanced</p>}
-                  </div>
-                  <div className="rounded-xl p-4" style={{
-                    background: balanced(m.stillToCheck) ? '#f0fdf4' : '#fff7ed',
-                    border: `1px solid ${balanced(m.stillToCheck) ? '#bbf7d0' : '#fed7aa'}`,
-                  }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Still To Check</p>
-                    <p className="text-xl font-bold" style={{ color: balanced(m.stillToCheck) ? '#166534' : '#c2410c', fontFamily: "'Georgia', serif" }}>
-                      {fmtSigned(m.stillToCheck)}
-                    </p>
-                    <p className="text-[9px] mt-1 font-mono" style={{ color: T.textMuted }}>Bank Error − Extra Paid</p>
-                    {balanced(m.stillToCheck) && <p className="text-[10px] mt-1 font-medium" style={{ color: '#166534' }}>✓ All accounted for</p>}
-                  </div>
-                </div>
-
-                {notes && (
-                  <div className="mt-4 px-4 py-3 rounded-xl"
-                    style={{ background: T.accentLight, border: `1px solid ${T.accentBorder}` }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.accent }}>Notes</p>
-                    <p className="text-sm" style={{ color: T.text }}>{notes}</p>
-                  </div>
-                )}
               </div>
             </Section>
-
-            {/* ══ SECTION 6: CASH LOG (collapsible) ══ */}
-            <CollapsibleTable
-              open={showCashLog}
-              onToggle={() => setShowCashLog(v => !v)}
-              toggleLabel={
-                <>
-                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Cash Log</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
-                    {cashLog.length} entries
-                  </span>
-                  <span className="text-xs font-semibold" style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
-                  <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>Dr: {fmt(m.cashBanked)}</span>
-                  <span className="text-xs font-semibold" style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>
-                    In Hand: {fmt(m.cashInHand)}
-                  </span>
-                </>
-              }>
-              {cashLog.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-4xl mb-2">📋</p>
-                  <p className="text-sm" style={{ color: T.textMuted }}>No cash log entries yet</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <table className="w-full text-sm" style={{ minWidth: '480px' }}>
-                    <thead>
-                      <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-                        {['#', 'Date & Time', 'Type', 'Amount', 'Description', 'By'].map(h => (
-                          <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
-                            style={{ color: T.textMuted }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cashLog.map((row, i) => (
-                        <tr key={row.id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                          <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
-                          <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
-                          <td className="px-3 py-3">
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                              style={{
-                                background: row.type === 'Cr' ? '#f0fdf4' : '#fef2f2',
-                                color:      row.type === 'Cr' ? '#166534' : '#dc2626',
-                                border:     `1px solid ${row.type === 'Cr' ? '#bbf7d0' : '#fecaca'}`,
-                              }}>
-                              {row.type === 'Cr' ? '📥 Cr' : '📤 Dr'}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3 text-sm font-semibold" style={{ color: row.type === 'Cr' ? '#166534' : '#dc2626' }}>
-                            {fmt(row.amount)}
-                          </td>
-                          <td className="px-3 py-3 text-xs" style={{ color: T.text }}>
-                            {row.description || <span style={{ color: T.textMuted }}>—</span>}
-                          </td>
-                          <td className="px-3 py-3 text-xs" style={{ color: T.textSub }}>{row.created_by}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr style={{ background: T.bg, borderTop: `2px solid ${T.border}` }}>
-                        <td colSpan={3} className="px-3 py-3 text-xs font-semibold" style={{ color: T.textMuted }}>Totals</td>
-                        <td colSpan={3} className="px-3 py-3">
-                          <div className="flex gap-3 text-xs font-semibold flex-wrap">
-                            <span style={{ color: '#166534' }}>Cr: {fmt(m.cashReceived)}</span>
-                            <span style={{ color: '#dc2626' }}>Dr: {fmt(cashLog.filter(r => r.type === 'Dr').reduce((s, r) => s + (r.amount || 0), 0))}</span>
-                            <span style={{ color: m.cashInHand >= 0 ? '#92400e' : '#dc2626' }}>In Hand: {fmt(m.cashInHand)}</span>
-                          </div>
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </CollapsibleTable>
-
-            {/* ══ SECTION 7: ADMISSIONS TABLE (collapsible) ══ */}
-            <CollapsibleTable
-              open={showAdmTable}
-              onToggle={() => setShowAdmTable(v => !v)}
-              toggleLabel={
-                <>
-                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Admissions</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
-                    {filteredAdmissions.length} records
-                  </span>
-                  <span className="text-xs font-semibold" style={{ color: '#166534' }}>
-                    Collected: {fmt(admSummary.totalCollected)}
-                  </span>
-                  {admSummary.totalDue > 0 && (
-                    <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>
-                      Due: {fmt(admSummary.totalDue)}
-                    </span>
-                  )}
-                </>
-              }>
-              <div className="p-4 border-b" style={{ borderColor: T.border }}>
-                <div className="flex items-center gap-3 flex-wrap mb-4">
-                  <div>
-                    <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
-                    <input
-                      type="date"
-                      value={admStartDate}
-                      onChange={(e) => setAdmStartDate(e.target.value)}
-                      className="px-3 py-2 rounded-xl focus:outline-none"
-                      style={{ ...inputBaseStyle, minHeight: '44px' }}/>
-                  </div>
-                  <div className="self-end pb-1">
-                    <span className="text-xs" style={{ color: T.textMuted }}>{filteredAdmissions.length} records</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <div className="rounded-xl p-3" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Records</p>
-                    <p className="text-lg font-bold" style={{ color: T.accent, fontFamily: "'Georgia', serif" }}>{admSummary.count}</p>
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#166534' }}>Collected</p>
-                    <p className="text-lg font-bold" style={{ color: '#16a34a', fontFamily: "'Georgia', serif" }}>{fmt(admSummary.totalCollected)}</p>
-                    <p className="text-[10px] mt-0.5" style={{ color: '#4ade80' }}>💵 {fmt(admSummary.cashCollected)} · 📱 {fmt(admSummary.onlineCollected)}</p>
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#991b1b' }}>Pending Due</p>
-                    <p className="text-lg font-bold" style={{ color: '#dc2626', fontFamily: "'Georgia', serif" }}>{fmt(admSummary.totalDue)}</p>
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: T.textMuted }}>Type</p>
-                    <p className="text-xs font-bold mt-1" style={{ color: '#166534' }}>New: {filteredAdmissions.filter(r => r.admission === 'New').length}</p>
-                    <p className="text-xs font-bold" style={{ color: T.accent }}>Renew: {filteredAdmissions.filter(r => r.admission === 'Renew').length}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                <table className="w-full text-sm" style={{ minWidth: '900px' }}>
-                  <thead>
-                    <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-                      {['#', 'Reg ID', 'Name', 'Type', 'Recorded On', 'Shift', 'Fees', 'Paid', 'Mode', 'Due Paid', 'Due Mode', 'Pending', 'Status'].map(h => (
-                        <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
-                          style={{ color: T.textMuted }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAdmissions.map((row, i) => (
-                      <tr key={row.register_id + i}
-                        className="transition-colors"
-                        style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
-                        <td className="px-3 py-3 text-xs font-mono font-medium" style={{ color: T.accent }}>
-                          <Link href={`/student/${row.mobile_number}`} className="hover:underline">{row.register_id}</Link>
-                        </td>
-                        <td className="px-3 py-3 text-sm font-medium whitespace-nowrap" style={{ color: T.text }}>
-                          <Link href={`/student/${row.mobile_number}`} className="hover:underline">{row.name}</Link>
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                            style={{
-                              background: row.admission === 'New' ? '#f0fdf4' : T.accentLight,
-                              color: row.admission === 'New' ? '#166534' : T.accent,
-                              border: `1px solid ${row.admission === 'New' ? '#bbf7d0' : T.accentBorder}`,
-                            }}>
-                            {row.admission || 'New'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>
-                          {row.timestamp ? new Date(row.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
-                        </td>
-                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{row.shift}</td>
-                        <td className="px-3 py-3 text-xs font-medium" style={{ color: T.text }}>{fmt(row.final_fees || 0)}</td>
-                        <td className="px-3 py-3 text-xs font-medium" style={{ color: '#16a34a' }}>{fmt(row.fees_submitted || 0)}</td>
-                        <td className="px-3 py-3">
-                          {row.mode
-                            ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                                style={{ background: row.mode === 'Cash' ? '#fefce8' : '#eff6ff', color: row.mode === 'Cash' ? '#854d0e' : '#1d4ed8', border: `1px solid ${row.mode === 'Cash' ? '#fde68a' : '#bfdbfe'}` }}>
-                                {row.mode}
-                              </span>
-                            : <span style={{ color: T.textMuted }}>—</span>}
-                        </td>
-                        <td className="px-3 py-3 text-xs font-medium" style={{ color: (row.due_fees_submitted || 0) > 0 ? '#16a34a' : T.textMuted }}>
-                          {(row.due_fees_submitted || 0) > 0 ? fmt(row.due_fees_submitted) : '—'}
-                        </td>
-                        <td className="px-3 py-3">
-                          {row.due_fees_mode
-                            ? <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                                style={{ background: row.due_fees_mode === 'Cash' ? '#fefce8' : '#eff6ff', color: row.due_fees_mode === 'Cash' ? '#854d0e' : '#1d4ed8', border: `1px solid ${row.due_fees_mode === 'Cash' ? '#fde68a' : '#bfdbfe'}` }}>
-                                {row.due_fees_mode}
-                              </span>
-                            : <span style={{ color: T.textMuted }}>—</span>}
-                        </td>
-                        <td className="px-3 py-3 text-xs font-medium" style={{ color: (row.due_fees || 0) > 0 ? '#dc2626' : T.textMuted }}>
-                          {(row.due_fees || 0) > 0 ? fmt(row.due_fees) : '—'}
-                        </td>
-                        <td className="px-3 py-3"><StatusBadge status={row.status}/></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CollapsibleTable>
-
-            {/* ══ SECTION 8: EXPENSES TABLE (collapsible) ══ */}
-            <CollapsibleTable
-              open={showExpTable}
-              onToggle={() => setShowExpTable(v => !v)}
-              toggleLabel={
-                <>
-                  <span className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: T.textMuted }}>Expenses</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                    style={{ background: T.accentLight, color: T.accent, border: `1px solid ${T.accentBorder}` }}>
-                    {filteredExpenses.length} records
-                  </span>
-                  <span className="text-xs font-semibold" style={{ color: '#dc2626' }}>Total: {fmt(expSummary.total)}</span>
-                  <span className="text-xs font-semibold" style={{ color: '#92400e' }}>💵 {fmt(expSummary.cash)}</span>
-                  <span className="text-xs font-semibold" style={{ color: '#1d4ed8' }}>📱 {fmt(expSummary.online)}</span>
-                </>
-              }>
-              <div className="p-4 border-b" style={{ borderColor: T.border }}>
-                <div className="flex items-center gap-3 flex-wrap mb-4">
-                  <div>
-                    <label className={labelCls} style={{ color: T.textSub }}>From Date</label>
-                    <input
-                      type="date"
-                      value={expStartDate}
-                      onChange={(e) => setExpStartDate(e.target.value)}
-                      className="px-3 py-2 rounded-xl focus:outline-none"
-                      style={{ ...inputBaseStyle, minHeight: '44px' }}/>
-                  </div>
-                  <div className="self-end pb-1">
-                    <span className="text-xs" style={{ color: T.textMuted }}>{filteredExpenses.length} records</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="rounded-xl p-3" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#991b1b' }}>Total Spent</p>
-                    <p className="text-lg font-bold" style={{ color: '#dc2626', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.total)}</p>
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: '#fefce8', border: '1px solid #fde68a' }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#854d0e' }}>💵 Cash</p>
-                    <p className="text-lg font-bold" style={{ color: '#92400e', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.cash)}</p>
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                    <p className="text-[10px] uppercase tracking-widest font-medium mb-1" style={{ color: '#1d4ed8' }}>📱 Online</p>
-                    <p className="text-lg font-bold" style={{ color: '#1d4ed8', fontFamily: "'Georgia', serif" }}>{fmt(expSummary.online)}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-                <table className="w-full text-sm" style={{ minWidth: '480px' }}>
-                  <thead>
-                    <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
-                      {['#', 'Date & Time', 'Description', 'Amount', 'Mode', 'By'].map(h => (
-                        <th key={h} className="text-left px-3 py-3 text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap"
-                          style={{ color: T.textMuted }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredExpenses.map((row, i) => (
-                      <tr key={row.id}
-                        className="transition-colors"
-                        style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td className="px-3 py-3 text-xs" style={{ color: T.textMuted }}>{i + 1}</td>
-                        <td className="px-3 py-3 text-xs whitespace-nowrap" style={{ color: T.textSub }}>{formatDateTime(row.created_at)}</td>
-                        <td className="px-3 py-3 text-xs" style={{ color: T.text, maxWidth: '200px' }}>{row.Description}</td>
-                        <td className="px-3 py-3 text-sm font-semibold" style={{ color: '#dc2626' }}>{fmt(row.Amount || 0)}</td>
-                        <td className="px-3 py-3">
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                            style={{
-                              background: row.Mode === 'Cash' ? '#fefce8' : '#eff6ff',
-                              color: row.Mode === 'Cash' ? '#854d0e' : '#1d4ed8',
-                              border: `1px solid ${row.Mode === 'Cash' ? '#fde68a' : '#bfdbfe'}`,
-                            }}>
-                            {row.Mode}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3 text-xs" style={{ color: T.textSub }}>{row.Created_by}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CollapsibleTable>
-          </>
-        )}
+          </div>
+        </CollapsibleTable>
 
       </div>
 
