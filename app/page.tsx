@@ -484,6 +484,7 @@ const StudentCard = memo(({
 }) => {
   const isPrivileged = role === 'admin' || role === 'manager' || role === 'partner'
   const canRenew = isPrivileged && s.status?.toLowerCase().includes('expired')
+  const canAdvanceRenew = role === 'admin' && s.status?.toLowerCase().includes('active') && !s.total_due
   const statusDot = s.status?.includes('Active') ? '#16a34a'
     : s.status?.includes('Blocked') ? '#9ca3af'
       : s.status?.toLowerCase().includes('freeze') ? '#0ea5e9'
@@ -557,11 +558,14 @@ const StudentCard = memo(({
           </div>
         </div>
       </div>
-      {canRenew && !selectable && (
+      {(canRenew || canAdvanceRenew) && !selectable && (
         <div className="px-4 pb-4 -mt-1">
           <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRenew(s) }}
             className="w-full py-1.5 rounded-lg text-xs font-semibold tracking-wide"
-            style={{ background: T.accent, color: 'white' }}>
+            style={{
+        background: canRenew ? T.accent : '#0ea5e9',
+        color: 'white'
+      }}>
             ↺ Renew
           </button>
         </div>
