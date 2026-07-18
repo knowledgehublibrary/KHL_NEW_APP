@@ -563,8 +563,9 @@ const StudentCard = memo(({
           <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRenew(s) }}
             className="w-full py-1.5 rounded-lg text-xs font-semibold tracking-wide"
             style={{
-        background: canRenew ? T.accent : '#0ea5e9',
-        color: 'white'
+        background: canRenew ? T.accent : '#e0f2fe',
+        color: canRenew ? 'white' : '#075985',
+        border: canRenew ? 'none' : '1px solid #7dd3fc'
       }}>
             ↺ Renew
           </button>
