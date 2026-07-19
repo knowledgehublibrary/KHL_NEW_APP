@@ -143,7 +143,7 @@ function formatExpiryDate(dateStr: string): string {
 //}
 
 // ─── WHATSAPP DUE/EXPIRY REMINDER LINK (bilingual, English + Hindi) ──
-const UPI_ID = 'khlguna@okaxis' // TODO: replace with your actual UPI ID
+const UPI_ID = 'khlguna@axisbank' // TODO: replace with your actual UPI ID
 const PAYMENT_MOBILE = '9329719892' // TODO: replace with the mobile number linked to UPI
 
 function getWhatsappReminderLink(s: any) {
