@@ -127,18 +127,56 @@ function formatExpiryDate(dateStr: string): string {
 }
 
 // ─── WHATSAPP DUE/EXPIRY REMINDER LINK (same message logic as student detail page) ──
-function getWhatsappReminderLink(name: string, mobile: string, due: number, expiry: string) {
+//function getWhatsappReminderLink(name: string, mobile: string, due: number, expiry: string) {
+  //const today = new Date()
+  //const exp = new Date(expiry)
+  //let message = ''
+  //if (due > 0 && exp < today) {
+    //message = `Hi ${name}, your plan was *expired on ${formatExpiryDate(expiry)}* and your *last due fees is Rs.${due}*.`
+  //} else if (due > 0) {
+    //message = `Hi ${name}, your *due fees is Rs.${due}*.`
+  //} else if (exp < today) {
+    //message = `Hi ${name}, your plan was *expired on ${formatExpiryDate(expiry)}*. Renew today!!`
+  //} else return ''
+  //const finalMsg = `${message}\n_Knowledge Hub Library_\nhttps://g.co/kgs/iMBXRFr`
+  //return `https://wa.me/91${mobile}?text=${encodeURIComponent(finalMsg)}`
+//}
+
+// ─── WHATSAPP DUE/EXPIRY REMINDER LINK (bilingual, English + Hindi) ──
+const UPI_ID = 'khlguna@okaxis' // TODO: replace with your actual UPI ID
+const PAYMENT_MOBILE = '9329719892' // TODO: replace with the mobile number linked to UPI
+
+function getWhatsappReminderLink(s: any) {
+  const { name, mobile_number: mobile, total_due, latest_expiry: expiry, latest_months: months, latest_seat: seat } = s
+  const due = total_due || 0
   const today = new Date()
   const exp = new Date(expiry)
-  let message = ''
-  if (due > 0 && exp < today) {
-    message = `Hi ${name}, your plan was *expired on ${formatExpiryDate(expiry)}* and your *last due fees is Rs.${due}*.`
+  const isExpired = exp < today
+  const isReserved = seat && seat !== '0' && seat !== 0
+
+  const planTypeEn = isReserved ? 'Reserved' : 'Unreserved'
+  const planTypeHi = isReserved ? 'रिज़र्व' : 'अनरिज़र्व्ड'
+  const ctaEn = isReserved ? 'secure your seat' : 'continue your access'
+  const ctaHi = isReserved ? 'अपनी सीट सुरक्षित रखने' : 'अपनी सुविधा जारी रखने'
+  const dateStr = formatExpiryDate(expiry)
+
+  let en = '', hi = ''
+
+  if (due > 0 && isExpired) {
+    en = `Hi ${name},\nYour ${months} Month ${planTypeEn} plan expired on ${dateStr}.\n*Last Due Amount: Rs.${due}*\n\nRenew today to ${ctaEn}!`
+    hi = `नमस्ते ${name},\nआपका ${months} महीने का ${planTypeHi} प्लान ${dateStr} को समाप्त हो गया है।\n*पिछला बकाया: Rs.${due}*\n\n${ctaHi} के लिए आज ही रिन्यू करें!`
   } else if (due > 0) {
-    message = `Hi ${name}, your *due fees is Rs.${due}*.`
-  } else if (exp < today) {
-    message = `Hi ${name}, your plan was *expired on ${formatExpiryDate(expiry)}*. Renew today!!`
+    en = `Hi ${name},\nYour library fee of *Rs.${due}* is still pending. Please clear it at the earliest to avoid any interruption in your access.`
+    hi = `नमस्ते ${name},\nआपकी लाइब्रेरी फीस *Rs.${due}* अभी भी बकाया है। कृपया अपनी सुविधा में किसी भी रुकावट से बचने के लिए जल्द से जल्द भुगतान करें।`
+  } else if (isExpired) {
+    en = `Hi ${name},\nYour ${months} Month ${planTypeEn} plan expired on ${dateStr}. Renew today to ${ctaEn}!`
+    hi = `नमस्ते ${name},\nआपका ${months} महीने का ${planTypeHi} प्लान ${dateStr} को समाप्त हो गया है। ${ctaHi} के लिए आज ही रिन्यू करें!`
   } else return ''
-  const finalMsg = `${message}\n_Knowledge Hub Library_\nhttps://g.co/kgs/iMBXRFr`
+
+  const payEn = `Pay online via UPI ID: *${UPI_ID}* (mobile: ${PAYMENT_MOBILE}) — please share a screenshot here — OR pay cash directly at the library.`
+  const payHi = `आप UPI ID: *${UPI_ID}* (मोबाइल: ${PAYMENT_MOBILE}) पर ऑनलाइन भुगतान कर सकते हैं (कृपया स्क्रीनशॉट यहाँ भेजें) या सीधे लाइब्रेरी में नकद जमा कर सकते हैं।`
+
+  const finalMsg = `${en}\n\n${payEn}\n\n${hi}\n\n${payHi}\n\n_Knowledge Hub Library_\nhttps://g.co/kgs/iMBXRFr`
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(finalMsg)}`
 }
 
@@ -494,7 +532,7 @@ const StudentCard = memo(({
   const hasDueCard = s.total_due > 0
   const showWhatsappReminder = isExpiredCard || hasDueCard
   const whatsappReminderLink = showWhatsappReminder
-    ? getWhatsappReminderLink(s.name, s.mobile_number, s.total_due || 0, s.latest_expiry)
+    ? getWhatsappReminderLink(s)
     : ''
 
   const innerContent = (
